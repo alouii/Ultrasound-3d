@@ -7,14 +7,20 @@ from concurrent.futures import ThreadPoolExecutor
 from scipy.ndimage import gaussian_filter
 from skimage import exposure
 import torch
-from realesrgan import RealESRGAN
+
+# Try to import RealESRGAN
+try:
+    from realesrgan import RealESRGAN
+    has_esrgan = True
+except ImportError:
+    has_esrgan = False
+    print("⚠️ RealESRGAN not installed. Super-resolution will be skipped.")
 
 # ---------------------------
 # Utility Functions
 # ---------------------------
 
 def preprocess_frame(frame, resize=256):
-    """Grayscale, CLAHE, normalize"""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, (resize, resize))
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
@@ -23,7 +29,6 @@ def preprocess_frame(frame, resize=256):
     return gray
 
 def super_resolve_frame(model, frame, device='cuda'):
-    """Apply ESRGAN super-resolution"""
     frame_tensor = torch.from_numpy(frame).unsqueeze(0).unsqueeze(0).to(device)
     with torch.no_grad():
         sr = model(frame_tensor)
@@ -32,11 +37,9 @@ def super_resolve_frame(model, frame, device='cuda'):
     return sr
 
 def load_video_frames(video_path, max_frames=100, resize=256, sr_model=None, device='cuda', threads=4):
-    """Load frames with optional super-resolution in parallel"""
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     total = min(total_frames, max_frames)
-    frames = []
 
     def process_frame(_):
         ret, frame = cap.read()
@@ -49,12 +52,10 @@ def load_video_frames(video_path, max_frames=100, resize=256, sr_model=None, dev
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         results = list(tqdm(executor.map(process_frame, range(total)), total=total, desc="Loading frames"))
-    frames = [f for f in results if f is not None]
     cap.release()
-    return frames
+    return [f for f in results if f is not None]
 
 def interpolate_missing_slices(volume, target_slices=100):
-    """Interpolate along Z-axis to fill gaps"""
     orig_slices = volume.shape[2]
     x = np.arange(orig_slices)
     x_new = np.linspace(0, orig_slices-1, target_slices)
@@ -65,7 +66,6 @@ def interpolate_missing_slices(volume, target_slices=100):
     return volume_interp
 
 def volume_to_pointcloud(volume, voxel_size=0.005, percentile=80):
-    """Convert 3D volume to Open3D point cloud"""
     threshold = np.percentile(volume, percentile)
     indices = np.argwhere(volume > threshold)
     colors = np.repeat(volume[indices[:,0], indices[:,1], indices[:,2]][:,None], 3, axis=1)
@@ -75,7 +75,7 @@ def volume_to_pointcloud(volume, voxel_size=0.005, percentile=80):
     return pc
 
 # ---------------------------
-# Main Pipeline
+# Main
 # ---------------------------
 
 def main():
@@ -92,45 +92,39 @@ def main():
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    # Load ESRGAN model if requested
     sr_model = None
-    if args.use_sr:
-        sr_model = RealESRGAN(device, scale=4)
-        sr_model.load_weights(args.sr_model_path)
 
-    # ---------------------------
-    # Step 1: Load video frames
-    # ---------------------------
-    print("🎥 Loading frames (with optional super-resolution)...")
-    frames = load_video_frames(args.video, max_frames=args.max_frames, resize=args.resize,
-                               sr_model=sr_model, device=device)
-    
-    # Stack frames to volume
+    # Load ESRGAN if requested and available
+    if args.use_sr:
+        if has_esrgan:
+            sr_model = RealESRGAN(device, scale=4)
+            sr_model.load_weights(args.sr_model_path)
+            print(f"✅ ESRGAN loaded on {device}")
+        else:
+            print("⚠️ RealESRGAN not found. Skipping super-resolution.")
+
+    # Step 1: Load frames
+    print("🎥 Loading video frames...")
+    frames = load_video_frames(args.video, max_frames=args.max_frames,
+                               resize=args.resize, sr_model=sr_model, device=device)
+
+    # Step 2: Stack frames into volume
     volume = np.stack(frames, axis=2)
 
-    # ---------------------------
-    # Step 2: Interpolate missing slices
-    # ---------------------------
-    print(" Interpolating missing slices...")
+    # Step 3: Interpolate missing slices
+    print("🔄 Interpolating slices...")
     volume = interpolate_missing_slices(volume, target_slices=args.target_slices)
 
-    # ---------------------------
-    # Step 3: 3D smoothing
-    # ---------------------------
-    print(" Applying 3D Gaussian smoothing...")
+    # Step 4: 3D Gaussian smoothing
+    print("🧱 Applying 3D Gaussian smoothing...")
     volume = gaussian_filter(volume, sigma=args.smooth_sigma)
 
-    # ---------------------------
-    # Step 4: Convert to point cloud
-    # ---------------------------
-    print(" Converting volume to point cloud...")
+    # Step 5: Convert to point cloud
+    print("📦 Converting volume to point cloud...")
     pc = volume_to_pointcloud(volume, voxel_size=args.voxel_size, percentile=args.percentile)
 
-    # ---------------------------
-    # Step 5: Visualize interactively
-    # ---------------------------
-    print(" Launching interactive 3D visualization...")
+    # Step 6: Interactive visualization
+    print("🔍 Launching interactive 3D visualization...")
     o3d.visualization.draw_geometries([pc])
 
 if __name__ == '__main__':
