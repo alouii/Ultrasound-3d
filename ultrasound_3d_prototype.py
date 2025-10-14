@@ -5,9 +5,6 @@ import torch
 from concurrent.futures import ThreadPoolExecutor
 from scipy.ndimage import gaussian_filter
 from skimage import exposure
-import open3d as o3d
-
-# Try to import RealESRGAN
 try:
     from realesrgan import RealESRGAN
     has_esrgan = True
@@ -15,8 +12,10 @@ except ImportError:
     has_esrgan = False
     print("⚠️ RealESRGAN not installed. Super-resolution will be skipped.")
 
+import pyvista as pv
+
 # ---------------------------
-# Preprocessing Functions
+# Preprocessing
 # ---------------------------
 
 def preprocess_frame(frame, resize=256):
@@ -49,6 +48,7 @@ def load_video_frames(video_path, max_frames=100, resize=256, sr_model=None, dev
             gray = super_resolve_frame(sr_model, gray, device=device)
         return gray
 
+    from tqdm import tqdm
     with ThreadPoolExecutor(max_workers=threads) as executor:
         results = list(tqdm(executor.map(process_frame, range(total)), total=total, desc="Loading frames"))
     cap.release()
@@ -65,7 +65,7 @@ def interpolate_missing_slices(volume, target_slices=100):
     return volume_interp
 
 # ---------------------------
-# Main Pipeline
+# Main
 # ---------------------------
 
 def main():
@@ -101,30 +101,28 @@ def main():
     print("🔄 Interpolating slices...")
     volume = interpolate_missing_slices(volume, target_slices=args.target_slices)
 
-    # Step 4: Smooth volume
+    # Step 4: Smooth
     print("🧱 Applying 3D Gaussian smoothing...")
     volume = gaussian_filter(volume, sigma=args.smooth_sigma)
 
-    # ---------------------------
-    # Step 5: Convert volume to Open3D Volume
-    # ---------------------------
-    print("🔍 Creating Open3D volume for rendering...")
-    # Normalize to [0,1]
+    # Step 5: Normalize for volume rendering
     volume_norm = (volume - np.min(volume)) / (np.max(volume) - np.min(volume) + 1e-8)
-    volume_o3d = o3d.geometry.VoxelGrid.create_from_dense(np.uint8(volume_norm*255))
 
-    # ---------------------------
-    # Step 6: Interactive visualization
-    # ---------------------------
-    print("🖥 Launching interactive volumetric rendering...")
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(window_name="3D Ultrasound Volumetric Rendering")
-    vis.add_geometry(volume_o3d)
-    vis.get_render_option().background_color = np.asarray([0, 0, 0])
-    vis.get_render_option().point_size = 2.0
-    vis.run()
-    vis.destroy_window()
+    # Step 6: Create PyVista volume
+    pv_volume = pv.UniformGrid()
+    pv_volume.dimensions = np.array(volume_norm.shape) + 1
+    pv_volume.spacing = (1,1,1)
+    pv_volume.origin = (0,0,0)
+    pv_volume.cell_arrays["values"] = volume_norm.flatten(order="F")
 
-if __name__ == '__main__':
-    from tqdm import tqdm
+    # Step 7: Visualize with interactive slicing
+    print("🖥 Launching interactive volumetric rendering with slicing...")
+    pl = pv.Plotter()
+    opacity = [0.0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]  # semi-transparent mapping
+    pl.add_volume(pv_volume, cmap="gray", opacity=opacity)
+    pl.add_axes()
+    pl.show_grid()
+    pl.show()
+
+if __name__ == "__main__":
     main()
