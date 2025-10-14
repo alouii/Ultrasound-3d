@@ -1,12 +1,11 @@
 import argparse
 import cv2
 import numpy as np
-import open3d as o3d
-from tqdm import tqdm
+import torch
 from concurrent.futures import ThreadPoolExecutor
 from scipy.ndimage import gaussian_filter
 from skimage import exposure
-import torch
+import open3d as o3d
 
 # Try to import RealESRGAN
 try:
@@ -17,7 +16,7 @@ except ImportError:
     print("⚠️ RealESRGAN not installed. Super-resolution will be skipped.")
 
 # ---------------------------
-# Utility Functions
+# Preprocessing Functions
 # ---------------------------
 
 def preprocess_frame(frame, resize=256):
@@ -65,17 +64,8 @@ def interpolate_missing_slices(volume, target_slices=100):
             volume_interp[i,j,:] = np.interp(x_new, x, volume[i,j,:])
     return volume_interp
 
-def volume_to_pointcloud(volume, voxel_size=0.005, percentile=80):
-    threshold = np.percentile(volume, percentile)
-    indices = np.argwhere(volume > threshold)
-    colors = np.repeat(volume[indices[:,0], indices[:,1], indices[:,2]][:,None], 3, axis=1)
-    pc = o3d.geometry.PointCloud()
-    pc.points = o3d.utility.Vector3dVector(indices * voxel_size)
-    pc.colors = o3d.utility.Vector3dVector(colors)
-    return pc
-
 # ---------------------------
-# Main
+# Main Pipeline
 # ---------------------------
 
 def main():
@@ -83,49 +73,58 @@ def main():
     parser.add_argument('--video', type=str, required=True)
     parser.add_argument('--max-frames', type=int, default=100)
     parser.add_argument('--resize', type=int, default=256)
-    parser.add_argument('--voxel-size', type=float, default=0.005)
     parser.add_argument('--smooth-sigma', type=float, default=1.0)
-    parser.add_argument('--percentile', type=float, default=80)
     parser.add_argument('--target-slices', type=int, default=150)
-    parser.add_argument('--use-sr', action='store_true', help="Enable super-resolution")
+    parser.add_argument('--use-sr', action='store_true')
     parser.add_argument('--sr-model-path', type=str, default='RealESRGAN_x4plus.pth')
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     sr_model = None
 
-    # Load ESRGAN if requested and available
-    if args.use_sr:
-        if has_esrgan:
-            sr_model = RealESRGAN(device, scale=4)
-            sr_model.load_weights(args.sr_model_path)
-            print(f"✅ ESRGAN loaded on {device}")
-        else:
-            print("⚠️ RealESRGAN not found. Skipping super-resolution.")
+    if args.use_sr and has_esrgan:
+        sr_model = RealESRGAN(device, scale=4)
+        sr_model.load_weights(args.sr_model_path)
+        print(f"✅ ESRGAN loaded on {device}")
+    elif args.use_sr:
+        print("⚠️ RealESRGAN not available. Skipping super-resolution.")
 
     # Step 1: Load frames
     print("🎥 Loading video frames...")
     frames = load_video_frames(args.video, max_frames=args.max_frames,
                                resize=args.resize, sr_model=sr_model, device=device)
 
-    # Step 2: Stack frames into volume
+    # Step 2: Stack into volume
     volume = np.stack(frames, axis=2)
 
     # Step 3: Interpolate missing slices
     print("🔄 Interpolating slices...")
     volume = interpolate_missing_slices(volume, target_slices=args.target_slices)
 
-    # Step 4: 3D Gaussian smoothing
+    # Step 4: Smooth volume
     print("🧱 Applying 3D Gaussian smoothing...")
     volume = gaussian_filter(volume, sigma=args.smooth_sigma)
 
-    # Step 5: Convert to point cloud
-    print("📦 Converting volume to point cloud...")
-    pc = volume_to_pointcloud(volume, voxel_size=args.voxel_size, percentile=args.percentile)
+    # ---------------------------
+    # Step 5: Convert volume to Open3D Volume
+    # ---------------------------
+    print("🔍 Creating Open3D volume for rendering...")
+    # Normalize to [0,1]
+    volume_norm = (volume - np.min(volume)) / (np.max(volume) - np.min(volume) + 1e-8)
+    volume_o3d = o3d.geometry.VoxelGrid.create_from_dense(np.uint8(volume_norm*255))
 
+    # ---------------------------
     # Step 6: Interactive visualization
-    print("🔍 Launching interactive 3D visualization...")
-    o3d.visualization.draw_geometries([pc])
+    # ---------------------------
+    print("🖥 Launching interactive volumetric rendering...")
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(window_name="3D Ultrasound Volumetric Rendering")
+    vis.add_geometry(volume_o3d)
+    vis.get_render_option().background_color = np.asarray([0, 0, 0])
+    vis.get_render_option().point_size = 2.0
+    vis.run()
+    vis.destroy_window()
 
 if __name__ == '__main__':
+    from tqdm import tqdm
     main()
