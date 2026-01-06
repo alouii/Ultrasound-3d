@@ -35,8 +35,17 @@ def load_video_as_volume(video_path, resize=256, max_frames=800):
     return volume
 
 
-def interpolate_volume(volume, factor=2, smooth_sigma=1.2):
-    """Interpolation et lissage 3D pour un rendu plus fluide."""
+def interpolate_volume(volume: np.ndarray, factor: int = 2, smooth_sigma: float = 1.2) -> np.ndarray:
+    """Interpolate along the Z axis and apply Gaussian smoothing.
+
+    Args:
+        volume: Input 3D volume (H x W x Z).
+        factor: Interpolation factor along Z axis.
+        smooth_sigma: Gaussian smoothing sigma.
+
+    Returns:
+        Smoothed interpolated volume as np.ndarray.
+    """
     vol_interp = zoom(volume, (1, 1, factor), order=1)
     vol_smooth = gaussian_filter(vol_interp, sigma=smooth_sigma)
     return vol_smooth

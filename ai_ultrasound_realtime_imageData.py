@@ -64,7 +64,11 @@ def sr_frame(sr_model, frame, device):
     return np.clip(out.squeeze().cpu().numpy(), 0.0, 1.0)
 
 
-def threaded_frame_reader(video_path, max_frames, resize, sr_model, device, threads):
+def threaded_frame_reader(video_path: str, max_frames: int, resize: Optional[int], sr_model, device: str, threads: int) -> Generator[Tuple[int, np.ndarray, np.ndarray], None, None]:
+    """Read frames in parallel and yield preprocessed frames with synthetic landmarks.
+
+    Yields tuples (index, frame_array, landmarks) where landmarks is an (N,2) array.
+    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")

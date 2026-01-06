@@ -5,8 +5,11 @@ import open3d as o3d
 from tqdm import tqdm
 
 
-def optimize_2d_frame(frame, crop_ratio=0.1, target_size=128):
-    """Enhance and resize 2D ultrasound frame."""
+def optimize_2d_frame(frame: np.ndarray, crop_ratio: float = 0.1, target_size: int = 128) -> np.ndarray:
+    """Enhance and resize a 2D ultrasound frame.
+
+    Returns a uint8 grayscale image of shape (target_size, target_size).
+    """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
     denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))

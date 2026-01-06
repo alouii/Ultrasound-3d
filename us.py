@@ -6,12 +6,12 @@ import torch.nn.functional as F
 import pyvista as pv
 from collections import deque
 import time
+from typing import Sequence
 
 # -------------------------------
 # Optional: CUDA acceleration
 # -------------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"[INFO] Using device: {device}")
 
 
 # -------------------------------
@@ -36,9 +36,17 @@ class SimpleSR(torch.nn.Module):
 # -------------------------------
 # Temporal 3D Ultrasound Reconstruction
 # -------------------------------
-def reconstruct_volume(frames, depth_scale=0.02, time_decay=0.9):
+def reconstruct_volume(frames: Sequence[np.ndarray], depth_scale: float = 0.02, time_decay: float = 0.9) -> np.ndarray:
     """
     Create a 3D volume from 2D frames using temporal accumulation.
+
+    Args:
+        frames: Sequence of 2D numpy arrays (H x W), uint8 (0-255) or float (0-1).
+        depth_scale: (unused) depth step per frame retained for API compatibility.
+        time_decay: multiplicative decay factor applied to older frames.
+
+    Returns:
+        A 3D numpy array shaped (H, W, len(frames)) with values normalized to [0, 1].
     """
     h, w = frames[0].shape
     volume = torch.zeros((h, w, len(frames)), device=device)
