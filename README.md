@@ -1,43 +1,88 @@
-# Ultrasound 3D 
-How to run (copy/paste):
+# Ultrasound 3D
 
-Quick training (CPU or GPU if available), saves model to depth_model.pt:
-python ultrasound_3d_prototype.py --train --simulate --save-model depth_model.pt --max-frames 400
+A small prototype project to build 3D ultrasound volumes from 2D video frames. It provides multiple scripts for quick experimentation, real-time visualization, and safe memory-limited workflows.
 
-Visualize reconstruction using the trained model:
-python ultrasound_3d_prototype.py --simulate --load-model depth_model.pt --max-frames 1000
+---
 
-Use a real video (grayscale or color; the code converts to grayscale):
-python ultrasound_3d_prototype.py --video path/to/your_video.mp4 --load-model depth_model.pt --max-frames 1000
+## Quick start
 
-Notes & limitations (important):
+1. Install runtime requirements:
 
-The training loop currently uses simulated ground-truth poses so the photometric warp is valid — adapting it to real unlabeled video will require either:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-a reliable pose estimator between frames (probe encoder, SLAM), or
+2. Run a safe low-resolution reconstruction (example):
 
-adding a learnable pose network (monodepth-style) and training jointly (I can add that next).
+   ```bash
+   python hybrid_ultrasound_3d_safe.py --video path/to/video.mp4 --resize 128
+   ```
 
-The fuser is a simplified TSDF-like accumulator (averaging depth into voxels). It's intentionally simple to be easy to understand. For production you'll want a proper TSDF on GPU (Open3D, Voxblox, or custom CUDA).
+3. Run the interactive real-time UI (requires `pyvistaqt`):
 
-Optical-flow → 3D pose conversion is heuristic here (assumes small motion, near-planar probe motion). It's suitable for prototyping but not clinical use.
+   ```bash
+   python ai_ultrasound_realtime_imageData.py --video path/to/video.mp4 --resize 256 --max-slices 200
+   ```
 
-## Development
+4. Reconstruct a full-resolution mesh (may be slow / memory-heavy):
 
-- Install dev tools: `pip install ruff black mypy pytest pytest-cov`
-- Run linters: `ruff check .` and `black --check .`
-- Type-check: `mypy --ignore-missing-imports .`
-- Run tests: `pytest -q`
+   ```bash
+   python hybrid_ultrasound_3d_full.py --video path/to/video.mp4 --resize 256 --threshold 0.5
+   ```
 
-### Quick commands (Makefile)
+---
 
-- Install runtime deps: `make install`
-- Install dev deps: `make dev-install`
-- Run linters: `make lint`
-- Format & auto-fix: `make format`
-- Run tests: `make test`
-- Run basic reconstruction: `make run-us VIDEO=path/to/video.mp4`
-- Run interactive real-time UI: `make run-rt VIDEO=path/to/video.mp4`
-- Run safe low-res reconstruction: `make run-safe VIDEO=path/to/video.mp4`
-- Run off-screen (headless): `make headless VIDEO=path/to/video.mp4`
-- Example using Xvfb: `make xvfb-run SCRIPT="python hybrid_ultrasound_3d_safe.py --video path/to/video.mp4"`
+## Scripts overview
+
+- `us.py` — simple temporal accumulation + PyVista renderer.
+- `ai_ultrasound_realtime_imageData.py` — real-time streaming demo with optional Real-ESRGAN and PyVista GUI.
+- `ultrasound_3d_prototype.py` — simulation / prototype utilities and SR option.
+- `hybrid_ultrasound_3d_full.py` — point-cloud / Poisson reconstruction pipeline (heavy-duty).
+- `hybrid_ultrasound_3d_safe.py` — memory-safe low-res pipeline for quick tests.
+- `hybrid_ultrasound_3d_safe2.py` — realistic smoothing & interpolation pipeline (includes French-language comments).
+
+---
+
+## Development & tests ✅
+
+- Install developer tools (linters, type-checker, test runner):
+
+  ```bash
+  pip install -r requirements-dev.txt
+  ```
+
+- Common commands (also in `Makefile`):
+
+  - `make install` — install runtime deps
+  - `make dev-install` — install runtime + dev deps
+  - `make lint` — run ruff/black/mypy
+  - `make format` — autoformat and apply fixes
+  - `make test` — run pytest
+
+---
+
+## Headless / CI
+
+- For headless/off-screen rendering set the environment variable:
+
+  ```bash
+  export PYVISTA_OFF_SCREEN=1
+  make headless VIDEO=path/to/video.mp4
+  ```
+
+- Example script using Xvfb (useful in CI): `scripts/headless_example.sh`.
+
+- CI is configured (`.github/workflows/ci.yml`) to run linters and tests on push/PR.
+
+---
+
+## Notes & limitations ⚠️
+
+- This is a research / prototype codebase — **not** suitable for clinical use.
+- Pose estimation and photometric consistency are simulated; adapting to real unlabeled data requires a pose estimator or a learnable pose network.
+- Mesh/voxel reconstruction implementations are intentionally simple; for production use optimized TSDF/Poisson pipelines or GPU-based approaches are recommended.
+
+---
+
+
+Contributions welcome — open an issue or PR with improvements or questions.
