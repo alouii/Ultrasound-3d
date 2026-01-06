@@ -61,7 +61,6 @@ def main():
         print("❌ Could not read video")
         return
     resize = args.resize
-    frame_shape = (resize, resize)
     max_slices = args.max_slices
 
     # Initialize 3D volume, coverage map, landmarks
@@ -93,7 +92,6 @@ def main():
     guidance_actor = None
 
     slice_idx = 0
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     while ret:
         gray = preprocess_frame(frame, resize)

@@ -3,7 +3,6 @@ import numpy as np
 import open3d as o3d
 import argparse
 from tqdm import tqdm
-import os
 
 def load_video_frames(video_path, resize=None):
     cap = cv2.VideoCapture(video_path)

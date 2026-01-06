@@ -138,8 +138,8 @@ def main():
 
     # GUI
     pl = BackgroundPlotter(title="AI Ultrasound Live")
-    vol_actor = pl.add_volume(grid, cmap="gray", opacity="linear", shade=True)
-    cover_actor = pl.add_volume(cover_grid, cmap="coolwarm", opacity="linear")
+    pl.add_volume(grid, cmap="gray", opacity="linear", shade=True)
+    pl.add_volume(cover_grid, cmap="coolwarm", opacity="linear")
     pl.add_axes()
     pl.show_grid()
 
@@ -174,8 +174,10 @@ def main():
             if landmarks_3d:
                 pts = np.array(landmarks_3d, dtype=np.float32)
                 if landmark_actor:
-                    try: pl.remove_actor(landmark_actor)
-                    except: pass
+                    try:
+                        pl.remove_actor(landmark_actor)
+                    except Exception:
+                        pass
                 landmark_actor = pl.add_points(pts, color='red', point_size=8, render_points_as_spheres=True)
 
             # guidance arrow
@@ -184,8 +186,10 @@ def main():
             tgt = np.array(min_idx, dtype=float)
             vec = tgt - center
             if guidance_actor:
-                try: pl.remove_actor(guidance_actor)
-                except: pass
+                try:
+                    pl.remove_actor(guidance_actor)
+                except Exception:
+                    pass
             arrow = pv.Arrow(start=center.tolist(), direction=vec.tolist(), scale=20.0)
             guidance_actor = pl.add_mesh(arrow, color='lime')
 
