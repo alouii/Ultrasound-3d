@@ -125,7 +125,16 @@ def main():
         plt.show()
 
     volume = preprocess_volume(volume)
-    visualize_volume(volume, threshold=args.threshold, voxel_size=args.voxel_size)
+
+    # Save result to out-dir (defaults to ./outputs)
+    parser.add_argument("--out-dir", type=str, default="outputs", help="Directory to save output mesh (PLY)")
+    # (re-parse to include new arg if passed via CLI environment)
+    args = parser.parse_args()
+    from utils.io import output_path_for_video
+
+    save_path = output_path_for_video(args.video, args.out_dir)
+    visualize_volume(volume, threshold=args.threshold, voxel_size=args.voxel_size, save_path=save_path)
+    print(f"✅ Mesh saved to {save_path}")
 
 
 if __name__ == "__main__":

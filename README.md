@@ -43,7 +43,7 @@ A small prototype project to build 3D ultrasound volumes from 2D video frames. I
 
 ---
 
-## Development & tests ✅
+## Development & tests 
 
 - Install developer tools (linters, type-checker, test runner):
 
@@ -76,7 +76,7 @@ A small prototype project to build 3D ultrasound volumes from 2D video frames. I
 
 ---
 
-## Notes & limitations ⚠️
+## Notes & limitations 
 
 - This is a research / prototype codebase — **not** suitable for clinical use.
 - Pose estimation and photometric consistency are simulated; adapting to real unlabeled data requires a pose estimator or a learnable pose network.

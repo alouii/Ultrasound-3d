@@ -46,8 +46,11 @@ def load_video_in_chunks(video_path, resize=128, crop_ratio=0.1, max_frames=1000
     return volume
 
 
-def visualize_volume(volume, threshold=0.5, voxel_size=2.0, downsample=2):
-    """Convert 3D numpy volume into voxel grid for visualization."""
+def visualize_volume(volume, threshold=0.5, voxel_size=2.0, downsample=2, out_path: str = None):
+    """Convert 3D numpy volume into voxel grid for visualization.
+
+    If `out_path` is provided, the generated point cloud is saved to that path (PLY).
+    """
     print("Converting volume to voxel grid safely...")
 
     # Downsample volume to avoid overload
@@ -72,6 +75,14 @@ def visualize_volume(volume, threshold=0.5, voxel_size=2.0, downsample=2):
     colors = np.zeros_like(points)
     colors[:, 2] = np.linspace(0, 1, len(points))
     pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    # Save point cloud if out_path is provided
+    if out_path:
+        try:
+            o3d.io.write_point_cloud(out_path, pcd)
+            print(f"✅ Point cloud saved to {out_path}")
+        except Exception as e:
+            print(f"⚠️ Failed to save point cloud: {e}")
 
     o3d.visualization.draw_geometries(
         [pcd], window_name="3D Ultrasound Volume (Safe Mode)"
@@ -100,6 +111,7 @@ if __name__ == "__main__":
         "--downsample", type=int, default=2, help="3D volume downsampling factor"
     )
 
+    parser.add_argument("--out-dir", type=str, default="outputs", help="Directory to save output point cloud (PLY)")
     args = parser.parse_args()
 
     volume = load_video_in_chunks(
@@ -108,9 +120,14 @@ if __name__ == "__main__":
         crop_ratio=args.crop_ratio,
         max_frames=args.max_frames,
     )
+
+    from utils.io import output_path_for_video
+
+    save_path = output_path_for_video(args.video, args.out_dir, suffix="points")
     visualize_volume(
         volume,
         threshold=args.threshold,
         voxel_size=args.voxel_size,
         downsample=args.downsample,
+        out_path=save_path,
     )
