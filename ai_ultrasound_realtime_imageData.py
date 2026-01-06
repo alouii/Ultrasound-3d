@@ -65,7 +65,14 @@ def sr_frame(sr_model, frame: np.ndarray, device: str) -> np.ndarray:
     return np.clip(out.squeeze().cpu().numpy(), 0.0, 1.0)
 
 
-def threaded_frame_reader(video_path: str, max_frames: int, resize: Optional[int], sr_model, device: str, threads: int) -> Generator[Tuple[int, np.ndarray, np.ndarray], None, None]:
+def threaded_frame_reader(
+    video_path: str,
+    max_frames: int,
+    resize: Optional[int],
+    sr_model,
+    device: str,
+    threads: int,
+) -> Generator[Tuple[int, np.ndarray, np.ndarray], None, None]:
     """Read frames in parallel and yield preprocessed frames with synthetic landmarks.
 
     Yields tuples (index, frame_array, landmarks) where landmarks is an (N,2) array.

@@ -36,7 +36,9 @@ class SimpleSR(torch.nn.Module):
 # -------------------------------
 # Temporal 3D Ultrasound Reconstruction
 # -------------------------------
-def reconstruct_volume(frames: Sequence[np.ndarray], depth_scale: float = 0.02, time_decay: float = 0.9) -> np.ndarray:
+def reconstruct_volume(
+    frames: Sequence[np.ndarray], depth_scale: float = 0.02, time_decay: float = 0.9
+) -> np.ndarray:
     """
     Create a 3D volume from 2D frames using temporal accumulation.
 

@@ -35,7 +35,9 @@ def load_video_as_volume(video_path, resize=256, max_frames=800):
     return volume
 
 
-def interpolate_volume(volume: np.ndarray, factor: int = 2, smooth_sigma: float = 1.2) -> np.ndarray:
+def interpolate_volume(
+    volume: np.ndarray, factor: int = 2, smooth_sigma: float = 1.2
+) -> np.ndarray:
     """Interpolate along the Z axis and apply Gaussian smoothing.
 
     Args:

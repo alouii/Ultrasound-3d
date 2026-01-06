@@ -5,7 +5,9 @@ import open3d as o3d
 from tqdm import tqdm
 
 
-def optimize_2d_frame(frame: np.ndarray, crop_ratio: float = 0.1, target_size: int = 128) -> np.ndarray:
+def optimize_2d_frame(
+    frame: np.ndarray, crop_ratio: float = 0.1, target_size: int = 128
+) -> np.ndarray:
     """Enhance and resize a 2D ultrasound frame.
 
     Returns a uint8 grayscale image of shape (target_size, target_size).
