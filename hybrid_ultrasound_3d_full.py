@@ -111,6 +111,7 @@ def main():
         action="store_true",
         help="Preview input frames before reconstruction",
     )
+    parser.add_argument("--out-dir", type=str, default="outputs", help="Directory to save output mesh (PLY)")
     args = parser.parse_args()
 
     volume = load_video_frames(args.video, resize=args.resize)
@@ -126,10 +127,6 @@ def main():
 
     volume = preprocess_volume(volume)
 
-    # Save result to out-dir (defaults to ./outputs)
-    parser.add_argument("--out-dir", type=str, default="outputs", help="Directory to save output mesh (PLY)")
-    # (re-parse to include new arg if passed via CLI environment)
-    args = parser.parse_args()
     from utils.io import output_path_for_video
 
     save_path = output_path_for_video(args.video, args.out_dir)
