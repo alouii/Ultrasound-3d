@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import open3d as o3d
 
+
 def video_to_volume(video_path, resize=256, preview=False):
     # Load video
     cap = cv2.VideoCapture(video_path)
@@ -22,7 +23,7 @@ def video_to_volume(video_path, resize=256, preview=False):
 
         if preview and idx % 10 == 0:
             cv2.imshow("Frame preview", gray)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
         idx += 1
 
@@ -35,6 +36,7 @@ def video_to_volume(video_path, resize=256, preview=False):
 
     return volume
 
+
 def volume_to_mesh(volume, threshold=0.5, voxel_size=1.0):
     # Convert to voxel grid
     voxels = (volume > threshold).astype(np.uint8)
@@ -45,11 +47,15 @@ def volume_to_mesh(volume, threshold=0.5, voxel_size=1.0):
         for y in range(dims[0]):
             for x in range(dims[1]):
                 if voxels[y, x, z]:
-                    voxel_list.append(o3d.geometry.VoxelGrid.create_dense(
-                        origin=[x*voxel_size, y*voxel_size, z*voxel_size],
-                        voxel_size=voxel_size,
-                        width=1, height=1, depth=1
-                    ))
+                    voxel_list.append(
+                        o3d.geometry.VoxelGrid.create_dense(
+                            origin=[x * voxel_size, y * voxel_size, z * voxel_size],
+                            voxel_size=voxel_size,
+                            width=1,
+                            height=1,
+                            depth=1,
+                        )
+                    )
     if not voxel_list:
         print("⚠️ No voxels above threshold. Try lowering threshold.")
         return None
@@ -60,17 +66,21 @@ def volume_to_mesh(volume, threshold=0.5, voxel_size=1.0):
 
     return voxel_grid
 
+
 def visualize_volume(volume, threshold=0.5, voxel_size=1.0):
     print("Converting volume to voxel mesh...")
     voxels = (volume > threshold).astype(np.uint8)
     voxel_grid = o3d.geometry.VoxelGrid()
-    voxel_grid.voxels = [o3d.geometry.VoxelGrid.Voxel([x, y, z], [1,1,1])
-                         for z in range(voxels.shape[2])
-                         for y in range(voxels.shape[0])
-                         for x in range(voxels.shape[1])
-                         if voxels[y, x, z]]
+    voxel_grid.voxels = [
+        o3d.geometry.VoxelGrid.Voxel([x, y, z], [1, 1, 1])
+        for z in range(voxels.shape[2])
+        for y in range(voxels.shape[0])
+        for x in range(voxels.shape[1])
+        if voxels[y, x, z]
+    ]
     print(f"Number of voxels: {len(voxel_grid.voxels)}")
     o3d.visualization.draw_geometries([voxel_grid])
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

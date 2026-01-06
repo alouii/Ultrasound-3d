@@ -68,26 +68,44 @@ def visualize_volume(volume, threshold=0.5, voxel_size=2.0, downsample=2):
     colors[:, 2] = np.linspace(0, 1, len(points))
     pcd.colors = o3d.utility.Vector3dVector(colors)
 
-    o3d.visualization.draw_geometries([pcd], window_name="3D Ultrasound Volume (Safe Mode)")
+    o3d.visualization.draw_geometries(
+        [pcd], window_name="3D Ultrasound Volume (Safe Mode)"
+    )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Memory-safe 3D Ultrasound Volume Reconstruction")
+    parser = argparse.ArgumentParser(
+        description="Memory-safe 3D Ultrasound Volume Reconstruction"
+    )
     parser.add_argument("--video", required=True, help="Path to ultrasound video file")
-    parser.add_argument("--resize", type=int, default=128, help="Resize each frame (smaller = safer)")
+    parser.add_argument(
+        "--resize", type=int, default=128, help="Resize each frame (smaller = safer)"
+    )
     parser.add_argument("--threshold", type=float, default=0.5, help="Voxel threshold")
-    parser.add_argument("--voxel-size", type=float, default=2.0, help="Voxel scaling factor")
-    parser.add_argument("--crop-ratio", type=float, default=0.1, help="Fraction to crop edges")
-    parser.add_argument("--max-frames", type=int, default=1000, help="Max frames to process")
-    parser.add_argument("--downsample", type=int, default=2, help="3D volume downsampling factor")
+    parser.add_argument(
+        "--voxel-size", type=float, default=2.0, help="Voxel scaling factor"
+    )
+    parser.add_argument(
+        "--crop-ratio", type=float, default=0.1, help="Fraction to crop edges"
+    )
+    parser.add_argument(
+        "--max-frames", type=int, default=1000, help="Max frames to process"
+    )
+    parser.add_argument(
+        "--downsample", type=int, default=2, help="3D volume downsampling factor"
+    )
 
     args = parser.parse_args()
 
     volume = load_video_in_chunks(
-        args.video, resize=args.resize,
-        crop_ratio=args.crop_ratio, max_frames=args.max_frames
+        args.video,
+        resize=args.resize,
+        crop_ratio=args.crop_ratio,
+        max_frames=args.max_frames,
     )
     visualize_volume(
-        volume, threshold=args.threshold,
-        voxel_size=args.voxel_size, downsample=args.downsample
+        volume,
+        threshold=args.threshold,
+        voxel_size=args.voxel_size,
+        downsample=args.downsample,
     )

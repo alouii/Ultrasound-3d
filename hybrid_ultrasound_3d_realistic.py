@@ -4,6 +4,7 @@ import argparse
 import open3d as o3d
 from tqdm import tqdm
 
+
 # =========================
 # 2D Image Optimization
 # =========================
@@ -16,7 +17,7 @@ def optimize_2d_frame(frame, crop_ratio=0.1):
     denoised = cv2.fastNlMeansDenoising(gray, None, 15, 7, 21)
 
     # Contrast enhancement using CLAHE
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(denoised)
 
     # Normalize intensity to [0,1]
@@ -83,7 +84,9 @@ def visualize_volume(volume, threshold=0.5, voxel_size=1.0):
 
     # Estimate normals for smoother visualization
     pcd.estimate_normals()
-    mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(pcd, alpha=voxel_size * 3.0)
+    mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(
+        pcd, alpha=voxel_size * 3.0
+    )
     mesh.compute_vertex_normals()
 
     o3d.visualization.draw_geometries([mesh], window_name="3D Ultrasound Volume")
@@ -93,14 +96,32 @@ def visualize_volume(volume, threshold=0.5, voxel_size=1.0):
 # Main Script
 # =========================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Hybrid Ultrasound 3D Volume Reconstruction (Optimized 2D Frames)")
+    parser = argparse.ArgumentParser(
+        description="Hybrid Ultrasound 3D Volume Reconstruction (Optimized 2D Frames)"
+    )
     parser.add_argument("--video", required=True, help="Path to ultrasound video file")
-    parser.add_argument("--resize", type=int, default=256, help="Resize each frame to (resize x resize)")
-    parser.add_argument("--threshold", type=float, default=0.4, help="Threshold for 3D voxel generation")
-    parser.add_argument("--voxel-size", type=float, default=1.0, help="Voxel size for visualization scale")
-    parser.add_argument("--crop-ratio", type=float, default=0.1, help="Crop ratio (fraction to remove from edges)")
+    parser.add_argument(
+        "--resize", type=int, default=256, help="Resize each frame to (resize x resize)"
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=0.4, help="Threshold for 3D voxel generation"
+    )
+    parser.add_argument(
+        "--voxel-size",
+        type=float,
+        default=1.0,
+        help="Voxel size for visualization scale",
+    )
+    parser.add_argument(
+        "--crop-ratio",
+        type=float,
+        default=0.1,
+        help="Crop ratio (fraction to remove from edges)",
+    )
 
     args = parser.parse_args()
 
-    volume = load_video_as_volume(args.video, resize=args.resize, crop_ratio=args.crop_ratio)
+    volume = load_video_as_volume(
+        args.video, resize=args.resize, crop_ratio=args.crop_ratio
+    )
     visualize_volume(volume, threshold=args.threshold, voxel_size=args.voxel_size)

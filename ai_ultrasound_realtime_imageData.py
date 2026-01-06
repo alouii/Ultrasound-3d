@@ -30,6 +30,7 @@ from scipy.ndimage import gaussian_filter
 import torch
 
 import pyvista as pv
+
 try:
     from pyvistaqt import BackgroundPlotter
 except ImportError:
@@ -38,9 +39,11 @@ except ImportError:
 # Optional Real-ESRGAN
 try:
     from realesrgan import RealESRGAN
+
     HAS_ESRGAN = True
 except ImportError:
     HAS_ESRGAN = False
+
 
 # -------------------- Utilities --------------------
 def preprocess_frame(frame, resize):
@@ -51,6 +54,7 @@ def preprocess_frame(frame, resize):
     gray = clahe.apply(gray)
     return gray.astype(np.float32) / 255.0
 
+
 def sr_frame(sr_model, frame, device):
     if sr_model is None:
         return frame
@@ -58,6 +62,7 @@ def sr_frame(sr_model, frame, device):
     with torch.no_grad():
         out = sr_model(tensor)
     return np.clip(out.squeeze().cpu().numpy(), 0.0, 1.0)
+
 
 def threaded_frame_reader(video_path, max_frames, resize, sr_model, device, threads):
     cap = cv2.VideoCapture(video_path)
@@ -88,24 +93,25 @@ def threaded_frame_reader(video_path, max_frames, resize, sr_model, device, thre
             yield i, res[0], res[1]
     cap.release()
 
+
 # -------------------- Main --------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--video', required=True)
-    parser.add_argument('--resize', type=int, default=256)
-    parser.add_argument('--max-slices', type=int, default=200)
-    parser.add_argument('--smooth-sigma', type=float, default=1.2)
-    parser.add_argument('--use-sr', action='store_true')
-    parser.add_argument('--sr-model-path', type=str, default='RealESRGAN_x4plus.pth')
-    parser.add_argument('--frame-delay', type=float, default=0.05)
-    parser.add_argument('--threads', type=int, default=4)
+    parser.add_argument("--video", required=True)
+    parser.add_argument("--resize", type=int, default=256)
+    parser.add_argument("--max-slices", type=int, default=200)
+    parser.add_argument("--smooth-sigma", type=float, default=1.2)
+    parser.add_argument("--use-sr", action="store_true")
+    parser.add_argument("--sr-model-path", type=str, default="RealESRGAN_x4plus.pth")
+    parser.add_argument("--frame-delay", type=float, default=0.05)
+    parser.add_argument("--threads", type=int, default=4)
     args = parser.parse_args()
 
     if BackgroundPlotter is None:
         print("pyvistaqt not found. Install: pip install pyvistaqt")
         return
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     sr_model = None
     if args.use_sr and HAS_ESRGAN:
         try:
@@ -151,22 +157,32 @@ def main():
         nonlocal volume, coverage, landmarks_3d, landmark_actor, guidance_actor
         slice_idx = 0
         for idx, proc_frame, landmarks2d in threaded_frame_reader(
-                args.video, max_frames=10**9, resize=resize, sr_model=sr_model, device=device, threads=args.threads):
+            args.video,
+            max_frames=10**9,
+            resize=resize,
+            sr_model=sr_model,
+            device=device,
+            threads=args.threads,
+        ):
             if stop_flag.is_set():
                 break
             zpos = slice_idx % max_slices
             volume[:, :, zpos] = proc_frame
             coverage[:, :, zpos] += 1.0
 
-            for (xpix, ypix) in landmarks2d:
-                xi, yi, zi = int(np.clip(xpix,0,resize-1)), int(np.clip(ypix,0,resize-1)), zpos
+            for xpix, ypix in landmarks2d:
+                xi, yi, zi = (
+                    int(np.clip(xpix, 0, resize - 1)),
+                    int(np.clip(ypix, 0, resize - 1)),
+                    zpos,
+                )
                 landmarks_3d.append([xi, yi, zi])
                 coverage[xi, yi, zi] += 1.0
 
             # smooth and normalize
             vol_sm = gaussian_filter(volume, sigma=smooth_sigma)
             vmin, vmax = vol_sm.min(), vol_sm.max()
-            norm = (vol_sm - vmin)/(vmax-vmin + 1e-8)
+            norm = (vol_sm - vmin) / (vmax - vmin + 1e-8)
             grid["values"] = norm.flatten(order="F")
             cover_grid["coverage"] = coverage.flatten(order="F")
 
@@ -178,11 +194,13 @@ def main():
                         pl.remove_actor(landmark_actor)
                     except Exception:
                         pass
-                landmark_actor = pl.add_points(pts, color='red', point_size=8, render_points_as_spheres=True)
+                landmark_actor = pl.add_points(
+                    pts, color="red", point_size=8, render_points_as_spheres=True
+                )
 
             # guidance arrow
             min_idx = np.unravel_index(np.argmin(coverage), coverage.shape)
-            center = np.array([resize//2, resize//2, zpos], dtype=float)
+            center = np.array([resize // 2, resize // 2, zpos], dtype=float)
             tgt = np.array(min_idx, dtype=float)
             vec = tgt - center
             if guidance_actor:
@@ -191,7 +209,7 @@ def main():
                 except Exception:
                     pass
             arrow = pv.Arrow(start=center.tolist(), direction=vec.tolist(), scale=20.0)
-            guidance_actor = pl.add_mesh(arrow, color='lime')
+            guidance_actor = pl.add_mesh(arrow, color="lime")
 
             pl.render()
             slice_idx += 1
@@ -208,6 +226,7 @@ def main():
         stop_flag.set()
         t.join(timeout=2)
         pl.close()
+
 
 if __name__ == "__main__":
     main()

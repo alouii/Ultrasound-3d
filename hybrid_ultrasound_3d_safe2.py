@@ -59,8 +59,12 @@ def render_volume(volume, opacity=0.3):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="3D Ultrasound realistic volume reconstruction")
-    parser.add_argument("--video", required=True, help="Chemin vers la vidéo échographique")
+    parser = argparse.ArgumentParser(
+        description="3D Ultrasound realistic volume reconstruction"
+    )
+    parser.add_argument(
+        "--video", required=True, help="Chemin vers la vidéo échographique"
+    )
     parser.add_argument("--resize", type=int, default=256)
     parser.add_argument("--max-frames", type=int, default=800)
     parser.add_argument("--interpolate", type=int, default=2)
@@ -68,6 +72,10 @@ if __name__ == "__main__":
     parser.add_argument("--opacity", type=float, default=0.3)
     args = parser.parse_args()
 
-    volume = load_video_as_volume(args.video, resize=args.resize, max_frames=args.max_frames)
-    volume = interpolate_volume(volume, factor=args.interpolate, smooth_sigma=args.smooth_sigma)
+    volume = load_video_as_volume(
+        args.video, resize=args.resize, max_frames=args.max_frames
+    )
+    volume = interpolate_volume(
+        volume, factor=args.interpolate, smooth_sigma=args.smooth_sigma
+    )
     render_volume(volume, opacity=args.opacity)

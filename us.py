@@ -13,6 +13,7 @@ import time
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"[INFO] Using device: {device}")
 
+
 # -------------------------------
 # Simple Super-Resolution Model (placeholder)
 # -------------------------------
@@ -26,7 +27,9 @@ class SimpleSR(torch.nn.Module):
     def forward(self, x):
         x = F.relu(self.conv1(x))
         x = self.conv2(x)
-        x = F.interpolate(x, scale_factor=self.upscale, mode="bilinear", align_corners=False)
+        x = F.interpolate(
+            x, scale_factor=self.upscale, mode="bilinear", align_corners=False
+        )
         return x
 
 
@@ -104,9 +107,15 @@ def render_volume(volume, threshold=0.3):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", type=str, help="Path to ultrasound video")
-    parser.add_argument("--frames", type=int, default=50, help="Number of frames to accumulate")
-    parser.add_argument("--sr", action="store_true", help="Enable simple super-resolution")
-    parser.add_argument("--threshold", type=float, default=0.3, help="Rendering threshold")
+    parser.add_argument(
+        "--frames", type=int, default=50, help="Number of frames to accumulate"
+    )
+    parser.add_argument(
+        "--sr", action="store_true", help="Enable simple super-resolution"
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=0.3, help="Rendering threshold"
+    )
     args = parser.parse_args()
 
     cap = cv2.VideoCapture(args.video)
@@ -131,7 +140,12 @@ def main():
         # --- Optional super-resolution enhancement ---
         if sr_model:
             with torch.no_grad():
-                inp = torch.tensor(gray, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0) / 255.0
+                inp = (
+                    torch.tensor(gray, dtype=torch.float32, device=device)
+                    .unsqueeze(0)
+                    .unsqueeze(0)
+                    / 255.0
+                )
                 out = sr_model(inp)
                 gray = (out.squeeze().cpu().numpy() * 255).astype(np.uint8)
 
@@ -140,7 +154,7 @@ def main():
 
         # Display progress
         cv2.imshow("Ultrasound Feed", gray)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
@@ -157,4 +171,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-#python ultrasound_3d_prototype.py --video ultrasound_clip.mp4 --frames 60 --sr
+# python ultrasound_3d_prototype.py --video ultrasound_clip.mp4 --frames 60 --sr
