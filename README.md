@@ -21,3 +21,10 @@ adding a learnable pose network (monodepth-style) and training jointly (I can ad
 The fuser is a simplified TSDF-like accumulator (averaging depth into voxels). It's intentionally simple to be easy to understand. For production you'll want a proper TSDF on GPU (Open3D, Voxblox, or custom CUDA).
 
 Optical-flow → 3D pose conversion is heuristic here (assumes small motion, near-planar probe motion). It's suitable for prototyping but not clinical use.
+
+## Development
+
+- Install dev tools: `pip install ruff black mypy pytest pytest-cov`
+- Run linters: `ruff check .` and `black --check .`
+- Type-check: `mypy --ignore-missing-imports .`
+- Run tests: `pytest -q`
