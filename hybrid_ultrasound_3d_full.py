@@ -4,6 +4,10 @@ import open3d as o3d
 import argparse
 from tqdm import tqdm
 
+# added for adaptive thresholding and TSDF/MC reconstruction
+from scipy.ndimage import distance_transform_edt, median_filter, binary_closing
+from skimage import measure, morphology
+
 
 def load_video_frames(video_path, resize=None):
     cap = cv2.VideoCapture(video_path)
@@ -37,8 +41,72 @@ def preprocess_volume(volume, smoothing=True):
     return volume
 
 
+def adaptive_mask_from_volume(volume, percentile=99.0, factor=0.6, 
+                              min_size=5000, closing_iter=2):
+    """Compute a cleaned binary mask from volume using an adaptive threshold.
+
+    Steps:
+    - threshold = percentile of intensity * factor
+    - median filter and binary closing to reduce speckle
+    - remove small connected components, keep largest
+    """
+    th = np.percentile(volume, percentile) * factor
+    mask = volume > th
+    # median to reduce speckle
+    mask = median_filter(mask.astype(np.uint8), size=3).astype(bool)
+    # binary closing to fill small holes
+    struct = np.ones((3, 3, 3), dtype=bool)
+    for _ in range(closing_iter):
+        mask = binary_closing(mask, structure=struct)
+
+    # remove small objects
+    mask = morphology.remove_small_objects(mask, min_size=min_size)
+
+    # ensure largest connected component
+    labels = morphology.label(mask)
+    if labels.max() == 0:
+        return mask
+    largest = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
+    return largest
+
+
+def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0):
+    """Convert binary mask to mesh using signed-distance (TSDF) and marching cubes.
+
+    Returns an Open3D TriangleMesh and saves it to save_path.
+    """
+    # signed distance: outside distance minus inside distance
+    print("Computing signed distance transform...")
+    inside = distance_transform_edt(mask)
+    outside = distance_transform_edt(~mask)
+    signed = outside - inside  # zero at boundary
+
+    # marching cubes at level 0
+    print("Running marching cubes on signed distance (level=0)...")
+    verts, faces, normals, values = measure.marching_cubes(signed, level=0.0)
+
+    if verts.size == 0 or faces.size == 0:
+        raise RuntimeError("Marching cubes returned no geometry")
+
+    # normalize and scale for visibility
+    verts = verts.astype(np.float32)
+    verts -= verts.mean(axis=0, keepdims=True)
+    verts /= (np.max(np.abs(verts)) + 1e-8)
+    verts *= 100 * voxel_scale
+
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(verts)
+    mesh.triangles = o3d.utility.Vector3iVector(faces.astype(np.int32))
+    mesh.compute_vertex_normals()
+
+    # save
+    o3d.io.write_triangle_mesh(save_path, mesh)
+    print(f"✅ TSDF mesh saved to {save_path}")
+    return mesh
+
+
 def visualize_volume(
-    volume, threshold=0.5, voxel_size=1.0, save_path="ultrasound_mesh.ply", show=True
+    volume, threshold=0.5, voxel_size=1.0, save_path="ultrasound_mesh.ply", show=True, method='poisson'
 ):
     print("Thresholding and building 3D volume...")
 
@@ -68,24 +136,37 @@ def visualize_volume(
         search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=5.0, max_nn=30)
     )
 
-    # Surface reconstruction
-    print("Reconstructing 3D surface using Poisson...")
-    try:
-        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-            pcd, depth=8
-        )
-    except Exception as e:
-        print(f"⚠️ Poisson reconstruction failed: {e}")
+    if method == 'poisson':
+        # Surface reconstruction using Poisson
+        print("Reconstructing 3D surface using Poisson...")
+        try:
+            mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                pcd, depth=8
+            )
+        except Exception as e:
+            print(f"⚠️ Poisson reconstruction failed: {e}")
+            return
+
+        # Clean up mesh
+        bbox = pcd.get_axis_aligned_bounding_box()
+        mesh = mesh.crop(bbox)
+        mesh.compute_vertex_normals()
+
+        # Save result
+        o3d.io.write_triangle_mesh(save_path, mesh)
+        print(f"✅ Mesh saved to {save_path}")
+
+    elif method == 'tsdf':
+        # Convert the intensity-based cloud to a binary mask and use TSDF+MC
+        try:
+            mask = adaptive_mask_from_volume(volume)
+            mesh = mask_to_mesh_tsdf(mask, save_path)
+        except Exception as e:
+            print(f"⚠️ TSDF reconstruction failed: {e}")
+            return
+    else:
+        print(f"Unknown reconstruction method: {method}")
         return
-
-    # Clean up mesh
-    bbox = pcd.get_axis_aligned_bounding_box()
-    mesh = mesh.crop(bbox)
-    mesh.compute_vertex_normals()
-
-    # Save result
-    o3d.io.write_triangle_mesh(save_path, mesh)
-    print(f"✅ Mesh saved to {save_path}")
 
     # Visualize if requested
     if show:
