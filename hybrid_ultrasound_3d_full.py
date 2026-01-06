@@ -38,7 +38,7 @@ def preprocess_volume(volume, smoothing=True):
 
 
 def visualize_volume(
-    volume, threshold=0.5, voxel_size=1.0, save_path="ultrasound_mesh.ply"
+    volume, threshold=0.5, voxel_size=1.0, save_path="ultrasound_mesh.ply", show=True
 ):
     print("Thresholding and building 3D volume...")
 
@@ -87,9 +87,14 @@ def visualize_volume(
     o3d.io.write_triangle_mesh(save_path, mesh)
     print(f"✅ Mesh saved to {save_path}")
 
-    # Visualize
-    print("Displaying 3D mesh...")
-    o3d.visualization.draw_geometries([mesh])
+    # Visualize if requested
+    if show:
+        try:
+            print("Displaying 3D mesh...")
+            o3d.visualization.draw_geometries([mesh])
+        except Exception as e:
+            print(f"⚠️ Visualization failed (headless?): {e}")
+            print("Saved mesh can be opened with Open3D/meshlab/Paraview.")
 
 
 def main():
@@ -111,7 +116,14 @@ def main():
         action="store_true",
         help="Preview input frames before reconstruction",
     )
-    parser.add_argument("--out-dir", type=str, default="outputs", help="Directory to save output mesh (PLY)")
+    parser.add_argument(
+        "--out-dir", type=str, default="outputs", help="Directory to save output mesh (PLY)"
+    )
+    parser.add_argument(
+        "--no-display",
+        action="store_true",
+        help="Do not open an interactive viewer after mesh reconstruction (useful for headless/CI)",
+    )
     args = parser.parse_args()
 
     volume = load_video_frames(args.video, resize=args.resize)
