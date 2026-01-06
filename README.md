@@ -87,6 +87,38 @@ A small prototype project to build 3D ultrasound volumes from 2D video frames. I
   - Avoid `--use-sr` (Real-ESRGAN) unless you have GPU and the model weights available — SR loads `torch` and the SR model, which increases memory use.
   - Use `--headless` for CI or batch/long-running jobs to prevent unnecessary GUI/VTK imports.
 
+### Viewing 3D results (interactive)
+
+After reconstruction you can view the cleaned mesh interactively in several ways. The project provides `scripts/view_mesh.py` which supports PyVista, Open3D, and an HTML/GLB exporter for headless environments.
+
+- Open with PyVista (recommended if you have an X11/Qt display):
+
+```bash
+python scripts/view_mesh.py outputs/autotune/combo_19_s1200_p98_f50_v2_t12_cleaned.ply --viewer pyvista
+```
+
+- Open with Open3D (works well locally or under `ssh -X`):
+
+```bash
+python scripts/view_mesh.py outputs/autotune/combo_19_s1200_p98_f50_v2_t12_cleaned.ply --viewer open3d
+```
+
+- Export a browser-friendly GLB + HTML viewer (works in headless servers):
+
+```bash
+python scripts/view_mesh.py outputs/autotune/combo_19_s1200_p98_f50_v2_t12_cleaned.ply --viewer html --open
+```
+
+Notes:
+- The HTML exporter requires `trimesh` (and a GLB serializer). Install with:
+
+```bash
+pip install trimesh pygltflib
+```
+
+- If you don't have a local display, prefer the `--viewer html` path; `--open` will start a small HTTP server and open the preview in your browser when possible.
+- If you want to view remotely with a GUI, use `ssh -X` / `ssh -Y` or a VNC tunnel to forward the display.
+
 ### Batch processing multiple videos
 
 There is a small helper to process a directory of videos and save per-video outputs:
