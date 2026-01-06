@@ -30,6 +30,7 @@ from scipy.ndimage import gaussian_filter
 import torch
 
 import pyvista as pv
+from typing import Optional, Tuple, Generator
 
 try:
     from pyvistaqt import BackgroundPlotter
@@ -46,7 +47,7 @@ except ImportError:
 
 
 # -------------------- Utilities --------------------
-def preprocess_frame(frame, resize):
+def preprocess_frame(frame: np.ndarray, resize: Optional[int]) -> np.ndarray:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     if resize is not None:
         gray = cv2.resize(gray, (resize, resize), interpolation=cv2.INTER_AREA)
@@ -55,7 +56,7 @@ def preprocess_frame(frame, resize):
     return gray.astype(np.float32) / 255.0
 
 
-def sr_frame(sr_model, frame, device):
+def sr_frame(sr_model, frame: np.ndarray, device: str) -> np.ndarray:
     if sr_model is None:
         return frame
     tensor = torch.from_numpy(frame).unsqueeze(0).unsqueeze(0).to(device)
