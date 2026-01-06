@@ -1,0 +1,9 @@
+numpy
+opencv-python
+scipy
+pyvista
+pyvistaqt
+open3d
+matplotlib
+torch
+realesrgan
