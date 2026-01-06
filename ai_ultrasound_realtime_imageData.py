@@ -22,11 +22,11 @@ python ai_ultrasound_realtime.py \
 import argparse
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
 
 import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 import torch
 
 import pyvista as pv
@@ -67,26 +67,31 @@ def sr_frame(sr_model, frame: np.ndarray, device: str) -> np.ndarray:
 
 def threaded_frame_reader(
     video_path: str,
-    max_frames: int,
+    max_frames: Optional[int],
     resize: Optional[int],
     sr_model,
     device: str,
     threads: int,
 ) -> Generator[Tuple[int, np.ndarray, np.ndarray], None, None]:
-    """Read frames in parallel and yield preprocessed frames with synthetic landmarks.
+    """Read frames from the video and yield preprocessed frames with synthetic landmarks.
 
-    Yields tuples (index, frame_array, landmarks) where landmarks is an (N,2) array.
+    This is a streaming reader that avoids pre-submitting a large number of tasks
+    (which can exhaust memory). If max_frames is None, read until EOF.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    max_to_read = min(max_frames, total_frames) if total_frames > 0 else max_frames
 
-    def read_frame(idx):
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    to_read = int(max_frames) if max_frames is not None else total if total > 0 else None
+
+    idx = 0
+    while True:
+        if to_read is not None and idx >= to_read:
+            break
         ret, frame = cap.read()
         if not ret:
-            return None
+            break
         proc = preprocess_frame(frame, resize)
         proc = sr_frame(sr_model, proc, device) if sr_model else proc
         # simulated landmarks for demo
@@ -94,15 +99,8 @@ def threaded_frame_reader(
         lm_x = rng.randint(0, proc.shape[1], size=5)
         lm_y = rng.randint(0, proc.shape[0], size=5)
         landmarks = np.stack([lm_x, lm_y], axis=1)
-        return proc, landmarks
-
-    with ThreadPoolExecutor(max_workers=threads) as ex:
-        futures = [ex.submit(read_frame, i) for i in range(max_to_read)]
-        for i, f in enumerate(futures):
-            res = f.result()
-            if res is None:
-                break
-            yield i, res[0], res[1]
+        yield idx, proc, landmarks
+        idx += 1
     cap.release()
 
 
@@ -143,7 +141,8 @@ def main():
     # rolling 3D volume
     volume = np.zeros((resize, resize, max_slices), dtype=np.float32)
     coverage = np.zeros_like(volume)
-    landmarks_3d = []
+    # cap landmark history to avoid unbounded memory growth
+    landmarks_3d = deque(maxlen=5000)
 
     # PyVista ImageData
     grid = pv.ImageData(dimensions=(resize, resize, max_slices))
@@ -170,7 +169,7 @@ def main():
         slice_idx = 0
         for idx, proc_frame, landmarks2d in threaded_frame_reader(
             args.video,
-            max_frames=10**9,
+            max_frames=None,
             resize=resize,
             sr_model=sr_model,
             device=device,
@@ -188,19 +187,19 @@ def main():
                     int(np.clip(ypix, 0, resize - 1)),
                     zpos,
                 )
-                landmarks_3d.append([xi, yi, zi])
+                landmarks_3d.append((xi, yi, zi))
                 coverage[xi, yi, zi] += 1.0
 
-            # smooth and normalize
-            vol_sm = gaussian_filter(volume, sigma=smooth_sigma)
+            # smooth along Z only (cheaper and uses less temporaries)
+            vol_sm = gaussian_filter1d(volume, sigma=smooth_sigma, axis=2)
             vmin, vmax = vol_sm.min(), vol_sm.max()
             norm = (vol_sm - vmin) / (vmax - vmin + 1e-8)
             grid["values"] = norm.flatten(order="F")
             cover_grid["coverage"] = coverage.flatten(order="F")
 
             # landmarks
-            if landmarks_3d:
-                pts = np.array(landmarks_3d, dtype=np.float32)
+            if len(landmarks_3d) > 0:
+                pts = np.array(list(landmarks_3d), dtype=np.float32)
                 if landmark_actor:
                     try:
                         pl.remove_actor(landmark_actor)
