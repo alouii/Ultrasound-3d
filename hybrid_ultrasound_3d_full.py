@@ -205,6 +205,30 @@ def main():
         action="store_true",
         help="Do not open an interactive viewer after mesh reconstruction (useful for headless/CI)",
     )
+    parser.add_argument(
+        "--method",
+        choices=["poisson", "tsdf"],
+        default="tsdf",
+        help="Reconstruction method: poisson (Poisson on point cloud) or tsdf (binary mask -> TSDF -> marching cubes)",
+    )
+    parser.add_argument(
+        "--mask-percentile",
+        type=float,
+        default=99.0,
+        help="Percentile for adaptive thresholding when using tsdf",
+    )
+    parser.add_argument(
+        "--mask-factor",
+        type=float,
+        default=0.6,
+        help="Factor multiplier applied to the percentile threshold when making the binary mask (tsdf method)",
+    )
+    parser.add_argument(
+        "--mask-min-size",
+        type=int,
+        default=2000,
+        help="Minimum connected component size to keep (voxels)",
+    )
     args = parser.parse_args()
 
     volume = load_video_frames(args.video, resize=args.resize)
@@ -223,9 +247,25 @@ def main():
     from utils.io import output_path_for_video
 
     save_path = output_path_for_video(args.video, args.out_dir)
-    visualize_volume(
-        volume, threshold=args.threshold, voxel_size=args.voxel_size, save_path=save_path, show=not args.no_display
-    )
+    if args.method == 'tsdf':
+        # pass mask params
+        global adaptive_mask_from_volume
+        mask = adaptive_mask_from_volume(volume, percentile=args.mask_percentile, factor=args.mask_factor, min_size=args.mask_min_size)
+        mesh = mask_to_mesh_tsdf(mask, save_path)
+        if not args.no_display:
+            try:
+                o3d.visualization.draw_geometries([mesh])
+            except Exception as e:
+                print(f"Visualization failed (headless?): {e}")
+    else:
+        visualize_volume(
+            volume,
+            threshold=args.threshold,
+            voxel_size=args.voxel_size,
+            save_path=save_path,
+            show=not args.no_display,
+            method=args.method,
+        )
     print(f"✅ Mesh saved to {save_path}")
 
 
