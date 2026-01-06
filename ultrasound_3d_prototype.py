@@ -2,9 +2,7 @@ import argparse
 import cv2
 import numpy as np
 import torch
-from concurrent.futures import ThreadPoolExecutor
 from scipy.ndimage import gaussian_filter
-from skimage import exposure
 try:
     from realesrgan import RealESRGAN
     has_esrgan = True
@@ -13,75 +11,42 @@ except ImportError:
     print("⚠️ RealESRGAN not installed. Super-resolution will be skipped.")
 
 import pyvista as pv
+from pyvistaqt import BackgroundPlotter
+import time
 
 # ---------------------------
-# Preprocessing
+# Frame Preprocessing
 # ---------------------------
-
 def preprocess_frame(frame, resize=256):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, (resize, resize))
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     gray = clahe.apply(gray)
-    gray = gray.astype(np.float32)/255.0
-    return gray
+    return gray.astype(np.float32) / 255.0
 
 def super_resolve_frame(model, frame, device='cuda'):
     frame_tensor = torch.from_numpy(frame).unsqueeze(0).unsqueeze(0).to(device)
     with torch.no_grad():
         sr = model(frame_tensor)
     sr = sr.squeeze().cpu().numpy()
-    sr = np.clip(sr, 0, 1)
-    return sr
-
-def load_video_frames(video_path, max_frames=100, resize=256, sr_model=None, device='cuda', threads=4):
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    total = min(total_frames, max_frames)
-
-    def process_frame(_):
-        ret, frame = cap.read()
-        if not ret:
-            return None
-        gray = preprocess_frame(frame, resize)
-        if sr_model:
-            gray = super_resolve_frame(sr_model, gray, device=device)
-        return gray
-
-    from tqdm import tqdm
-    with ThreadPoolExecutor(max_workers=threads) as executor:
-        results = list(tqdm(executor.map(process_frame, range(total)), total=total, desc="Loading frames"))
-    cap.release()
-    return [f for f in results if f is not None]
-
-def interpolate_missing_slices(volume, target_slices=100):
-    orig_slices = volume.shape[2]
-    x = np.arange(orig_slices)
-    x_new = np.linspace(0, orig_slices-1, target_slices)
-    volume_interp = np.zeros((volume.shape[0], volume.shape[1], target_slices), dtype=volume.dtype)
-    for i in range(volume.shape[0]):
-        for j in range(volume.shape[1]):
-            volume_interp[i,j,:] = np.interp(x_new, x, volume[i,j,:])
-    return volume_interp
+    return np.clip(sr, 0, 1)
 
 # ---------------------------
-# Main
+# Main Streaming Simulation
 # ---------------------------
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--video', type=str, required=True)
-    parser.add_argument('--max-frames', type=int, default=100)
     parser.add_argument('--resize', type=int, default=256)
+    parser.add_argument('--max-slices', type=int, default=200)
     parser.add_argument('--smooth-sigma', type=float, default=1.0)
-    parser.add_argument('--target-slices', type=int, default=150)
     parser.add_argument('--use-sr', action='store_true')
     parser.add_argument('--sr-model-path', type=str, default='RealESRGAN_x4plus.pth')
+    parser.add_argument('--frame-delay', type=float, default=0.05)  # seconds between frames
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     sr_model = None
-
     if args.use_sr and has_esrgan:
         sr_model = RealESRGAN(device, scale=4)
         sr_model.load_weights(args.sr_model_path)
@@ -89,39 +54,104 @@ def main():
     elif args.use_sr:
         print("⚠️ RealESRGAN not available. Skipping super-resolution.")
 
-    # Step 1: Load frames
-    print("🎥 Loading video frames...")
-    frames = load_video_frames(args.video, max_frames=args.max_frames,
-                               resize=args.resize, sr_model=sr_model, device=device)
+    # Initialize video
+    cap = cv2.VideoCapture(args.video)
+    ret, frame = cap.read()
+    if not ret:
+        print("❌ Could not read video")
+        return
+    resize = args.resize
+    frame_shape = (resize, resize)
+    max_slices = args.max_slices
 
-    # Step 2: Stack into volume
-    volume = np.stack(frames, axis=2)
+    # Initialize 3D volume, coverage map, landmarks
+    volume = np.zeros((resize, resize, max_slices), dtype=np.float32)
+    coverage = np.zeros_like(volume, dtype=np.float32)
+    landmark_points = []
 
-    # Step 3: Interpolate missing slices
-    print("🔄 Interpolating slices...")
-    volume = interpolate_missing_slices(volume, target_slices=args.target_slices)
+    # PyVista plotter setup
+    grid = pv.UniformGrid()
+    grid.dimensions = np.array(volume.shape) + 1
+    grid.spacing = (1,1,1)
+    grid.origin = (0,0,0)
+    grid.cell_arrays["values"] = volume.flatten(order="F")
 
-    # Step 4: Smooth
-    print("🧱 Applying 3D Gaussian smoothing...")
-    volume = gaussian_filter(volume, sigma=args.smooth_sigma)
-
-    # Step 5: Normalize for volume rendering
-    volume_norm = (volume - np.min(volume)) / (np.max(volume) - np.min(volume) + 1e-8)
-
-    # Step 6: Create PyVista volume
-    pv_volume = pv.UniformGrid()
-    pv_volume.dimensions = np.array(volume_norm.shape) + 1
-    pv_volume.spacing = (1,1,1)
-    pv_volume.origin = (0,0,0)
-    pv_volume.cell_arrays["values"] = volume_norm.flatten(order="F")
-
-    # Step 7: Visualize with interactive slicing
-    print("🖥 Launching interactive volumetric rendering with slicing...")
-    pl = pv.Plotter()
-    opacity = [0.0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]  # semi-transparent mapping
-    pl.add_volume(pv_volume, cmap="gray", opacity=opacity)
+    pl = BackgroundPlotter()
+    vol_actor = pl.add_volume(grid, cmap="gray", opacity="linear", shade=True)
     pl.add_axes()
     pl.show_grid()
+
+    # Coverage overlay
+    coverage_grid = pv.UniformGrid()
+    coverage_grid.dimensions = np.array(volume.shape) + 1
+    coverage_grid.spacing = (1,1,1)
+    coverage_grid.origin = (0,0,0)
+    coverage_grid.cell_arrays["coverage"] = coverage.flatten(order="F")
+    coverage_actor = pl.add_volume(coverage_grid, cmap="coolwarm", opacity="linear")
+
+    # Guidance arrow placeholder
+    guidance_actor = None
+
+    slice_idx = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    while ret:
+        gray = preprocess_frame(frame, resize)
+        if sr_model:
+            gray = super_resolve_frame(sr_model, gray, device=device)
+
+        # Update volume: simple rolling buffer
+        volume[:,:,slice_idx % max_slices] = gray
+        coverage[:,:,slice_idx % max_slices] += 1
+
+        # Simulate landmarks per frame
+        num_landmarks = 5
+        landmarks_2d = np.column_stack((
+            np.random.randint(0, resize, size=num_landmarks),
+            np.random.randint(0, resize, size=num_landmarks)
+        ))
+        z = slice_idx % max_slices
+        for x, y in landmarks_2d:
+            landmark_points.append([x, y, z])
+            coverage[int(x), int(y), int(z)] += 1
+
+        # Apply Gaussian smoothing
+        vol_smoothed = gaussian_filter(volume, sigma=args.smooth_sigma)
+
+        # Normalize
+        vol_norm = (vol_smoothed - np.min(vol_smoothed)) / (np.max(vol_smoothed) - np.min(vol_smoothed) + 1e-8)
+        grid.cell_arrays["values"] = vol_norm.flatten(order="F")
+        vol_actor.mapper.update()
+
+        # Update coverage overlay
+        coverage_grid.cell_arrays["coverage"] = coverage.flatten(order="F")
+        coverage_actor.mapper.update()
+
+        # Update landmarks
+        if landmark_points:
+            landmark_array = np.array(landmark_points)
+            if hasattr(pl, 'landmark_actor'):
+                pl.remove_actor(pl.landmark_actor)
+            pl.landmark_actor = pl.add_points(landmark_array, color='red', point_size=10, render_points_as_spheres=True)
+
+        # Update guidance arrow
+        idx_min = np.unravel_index(np.argmin(coverage), coverage.shape)
+        current_pos = np.array([resize//2, resize//2, slice_idx % max_slices])
+        vector = np.array(idx_min) - current_pos
+        if guidance_actor:
+            pl.remove_actor(guidance_actor)
+        guidance_actor = pl.add_mesh(pv.Arrow(start=current_pos, direction=vector, scale=20), color='green')
+
+        # Render
+        pl.render()
+        slice_idx += 1
+
+        # Wait for next frame
+        time.sleep(args.frame_delay)
+        ret, frame = cap.read()
+
+    cap.release()
+    print("✅ Video streaming simulation complete.")
     pl.show()
 
 if __name__ == "__main__":
