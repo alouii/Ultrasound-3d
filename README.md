@@ -72,6 +72,21 @@ A small prototype project to build 3D ultrasound volumes from 2D video frames. I
 
 - Example script using Xvfb (useful in CI): `scripts/headless_example.sh`.
 
+### ai_ultrasound_realtime: headless mode and memory tips
+
+- The real-time demo supports a `--headless` flag to run without the PyVista/Qt GUI (this avoids heavy GUI imports and keeps memory usage low):
+
+  ```bash
+  python ai_ultrasound_realtime_imageData.py --video path/to/video.mp4 --resize 256 --max-slices 200 --frame-delay 0.05 --headless > run.log
+  ```
+
+  When run in headless mode the script performs lightweight progress logging and prints periodic RSS lines (useful for quick memory checks). Redirect stdout to a file if you want to persist logs.
+
+- Memory tips:
+  - Use smaller `--resize` values (e.g., `64` or `128`) on memory-constrained machines.
+  - Avoid `--use-sr` (Real-ESRGAN) unless you have GPU and the model weights available — SR loads `torch` and the SR model, which increases memory use.
+  - Use `--headless` for CI or batch/long-running jobs to prevent unnecessary GUI/VTK imports.
+
 ### Batch processing multiple videos
 
 There is a small helper to process a directory of videos and save per-video outputs:
