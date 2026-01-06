@@ -142,7 +142,9 @@ def main():
     from utils.io import output_path_for_video
 
     save_path = output_path_for_video(args.video, args.out_dir)
-    visualize_volume(volume, threshold=args.threshold, voxel_size=args.voxel_size, save_path=save_path)
+    visualize_volume(
+        volume, threshold=args.threshold, voxel_size=args.voxel_size, save_path=save_path, show=not args.no_display
+    )
     print(f"✅ Mesh saved to {save_path}")
 
 
