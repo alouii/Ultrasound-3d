@@ -37,6 +37,13 @@ headless:
 	# Run rendering scripts in headless/off-screen mode
 	PYVISTA_OFF_SCREEN=1 $(PY) hybrid_ultrasound_3d_safe.py --video $(VIDEO) --resize 128
 
+batch:
+	# Batch process a directory of videos (set INPUT_DIR, OUT_DIR, WORKERS)
+	INPUT_DIR=${INPUT_DIR:-dataset/videos}
+	OUT_DIR=${OUT_DIR:-outputs}
+	WORKERS=${WORKERS:-1}
+	$(PY) scripts/batch_process.py --input-dir $(INPUT_DIR) --out-dir $(OUT_DIR) --workers $(WORKERS) --script full --headless
+
 xvfb-run:
 	# Example: make xvfb-run SCRIPT="python hybrid_ultrasound_3d_safe.py --video $(VIDEO)"
 	xvfb-run -a -s "-screen 0 1280x720x24" $(SCRIPT)
