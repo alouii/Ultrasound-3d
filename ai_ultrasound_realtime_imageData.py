@@ -27,42 +27,36 @@ from collections import deque
 import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
-import torch
-
-import pyvista as pv
 from typing import Optional, Tuple, Generator
 
-try:
-    from pyvistaqt import BackgroundPlotter
-except ImportError:
-    BackgroundPlotter = None
+# Reuse CLAHE instance to avoid re-creating it per-frame
+_CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
-# Optional Real-ESRGAN
-try:
-    from realesrgan import RealESRGAN
-
-    HAS_ESRGAN = True
-except ImportError:
-    HAS_ESRGAN = False
+# Optional libs will be imported lazily when needed
+HAS_ESRGAN = False
+BackgroundPlotter = None
 
 
 # -------------------- Utilities --------------------
 def preprocess_frame(frame: np.ndarray, resize: Optional[int]) -> np.ndarray:
+    """Preprocess a single frame using the global CLAHE instance."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     if resize is not None:
         gray = cv2.resize(gray, (resize, resize), interpolation=cv2.INTER_AREA)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
+    gray = _CLAHE.apply(gray)
     return gray.astype(np.float32) / 255.0
 
 
 def sr_frame(sr_model, frame: np.ndarray, device: str) -> np.ndarray:
+    """Apply SR model; import torch lazily only when needed."""
     if sr_model is None:
         return frame
+    import torch
+
     tensor = torch.from_numpy(frame).unsqueeze(0).unsqueeze(0).to(device)
     with torch.no_grad():
         out = sr_model(tensor)
-    return np.clip(out.squeeze().cpu().numpy(), 0.0, 1.0)
+    return np.clip(out.squeeze().cpu().numpy(), 0.0, 1.0)    
 
 
 def threaded_frame_reader(
@@ -115,24 +109,41 @@ def main():
     parser.add_argument("--sr-model-path", type=str, default="RealESRGAN_x4plus.pth")
     parser.add_argument("--frame-delay", type=float, default=0.05)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--headless", action="store_true", help="Run without GUI (no pyvista/qt imports)")
     args = parser.parse_args()
 
-    if BackgroundPlotter is None:
-        print("pyvistaqt not found. Install: pip install pyvistaqt")
-        return
+    headless = args.headless
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Lazy load torch only if SR is requested
     sr_model = None
-    if args.use_sr and HAS_ESRGAN:
+    device = "cpu"
+    if args.use_sr:
         try:
-            sr_model = RealESRGAN(device, scale=4)
-            sr_model.load_weights(args.sr_model_path)
-            print("Real-ESRGAN loaded on", device)
-        except Exception as e:
-            print("Warning: Real-ESRGAN failed:", e)
-            sr_model = None
-    elif args.use_sr:
-        print("Real-ESRGAN not installed, skipping SR.")
+            import torch
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            print("Warning: torch not available; SR will be disabled.")
+            device = "cpu"
+
+        # Lazy import Real-ESRGAN
+        try:
+            from realesrgan import RealESRGAN
+
+            HAS_ESRGAN = True
+        except Exception:
+            HAS_ESRGAN = False
+
+        if args.use_sr and HAS_ESRGAN:
+            try:
+                sr_model = RealESRGAN(device, scale=4)
+                sr_model.load_weights(args.sr_model_path)
+                print("Real-ESRGAN loaded on", device)
+            except Exception as e:
+                print("Warning: Real-ESRGAN failed:", e)
+                sr_model = None
+        elif args.use_sr:
+            print("Real-ESRGAN not installed, skipping SR.")
 
     resize = args.resize
     max_slices = args.max_slices
@@ -144,21 +155,37 @@ def main():
     # cap landmark history to avoid unbounded memory growth
     landmarks_3d = deque(maxlen=5000)
 
-    # PyVista ImageData
-    grid = pv.ImageData(dimensions=(resize, resize, max_slices))
-    grid.origin = (0, 0, 0)
-    grid.spacing = (1, 1, 1)
-    grid["values"] = volume.flatten(order="F")
+    # Conditionally import and initialize PyVista/Qt GUI only if not headless
+    render_enabled = not headless
+    if render_enabled:
+        try:
+            import pyvista as pv
+            from pyvistaqt import BackgroundPlotter
+        except Exception:
+            print("pyvista/pyvistaqt UI not available; falling back to headless mode.")
+            render_enabled = False
 
-    cover_grid = pv.ImageData(dimensions=(resize, resize, max_slices))
-    cover_grid["coverage"] = coverage.flatten(order="F")
+    if render_enabled:
+        # PyVista ImageData
+        grid = pv.ImageData(dimensions=(resize, resize, max_slices))
+        grid.origin = (0, 0, 0)
+        grid.spacing = (1, 1, 1)
+        grid["values"] = volume.flatten(order="F")
 
-    # GUI
-    pl = BackgroundPlotter(title="AI Ultrasound Live")
-    pl.add_volume(grid, cmap="gray", opacity="linear", shade=True)
-    pl.add_volume(cover_grid, cmap="coolwarm", opacity="linear")
-    pl.add_axes()
-    pl.show_grid()
+        cover_grid = pv.ImageData(dimensions=(resize, resize, max_slices))
+        cover_grid["coverage"] = coverage.flatten(order="F")
+
+        # GUI
+        pl = BackgroundPlotter(title="AI Ultrasound Live")
+        pl.add_volume(grid, cmap="gray", opacity="linear", shade=True)
+        pl.add_volume(cover_grid, cmap="coolwarm", opacity="linear")
+        pl.add_axes()
+        pl.show_grid()
+    else:
+        print("Running in headless mode; no GUI will be created.")
+        pl = None
+        grid = None
+        cover_grid = None
 
     landmark_actor = None
     guidance_actor = None
@@ -190,39 +217,51 @@ def main():
                 landmarks_3d.append((xi, yi, zi))
                 coverage[xi, yi, zi] += 1.0
 
-            # smooth along Z only (cheaper and uses less temporaries)
-            vol_sm = gaussian_filter1d(volume, sigma=smooth_sigma, axis=2)
-            vmin, vmax = vol_sm.min(), vol_sm.max()
-            norm = (vol_sm - vmin) / (vmax - vmin + 1e-8)
-            grid["values"] = norm.flatten(order="F")
-            cover_grid["coverage"] = coverage.flatten(order="F")
+            if render_enabled and grid is not None:
+                # smooth along Z only (cheaper and uses less temporaries)
+                vol_sm = gaussian_filter1d(volume, sigma=smooth_sigma, axis=2)
+                vmin, vmax = vol_sm.min(), vol_sm.max()
+                norm = (vol_sm - vmin) / (vmax - vmin + 1e-8)
+                grid["values"] = norm.flatten(order="F")
+                cover_grid["coverage"] = coverage.flatten(order="F")
 
-            # landmarks
-            if len(landmarks_3d) > 0:
-                pts = np.array(list(landmarks_3d), dtype=np.float32)
-                if landmark_actor:
+                # landmarks
+                if len(landmarks_3d) > 0:
+                    pts = np.array(list(landmarks_3d), dtype=np.float32)
+                    if landmark_actor:
+                        try:
+                            pl.remove_actor(landmark_actor)
+                        except Exception:
+                            pass
+                    landmark_actor = pl.add_points(
+                        pts, color="red", point_size=8, render_points_as_spheres=True
+                    )
+
+                # guidance arrow
+                min_idx = np.unravel_index(np.argmin(coverage), coverage.shape)
+                center = np.array([resize // 2, resize // 2, zpos], dtype=float)
+                tgt = np.array(min_idx, dtype=float)
+                vec = tgt - center
+                if guidance_actor:
                     try:
-                        pl.remove_actor(landmark_actor)
+                        pl.remove_actor(guidance_actor)
                     except Exception:
                         pass
-                landmark_actor = pl.add_points(
-                    pts, color="red", point_size=8, render_points_as_spheres=True
-                )
+                arrow = pv.Arrow(start=center.tolist(), direction=vec.tolist(), scale=20.0)
+                guidance_actor = pl.add_mesh(arrow, color="lime")
 
-            # guidance arrow
-            min_idx = np.unravel_index(np.argmin(coverage), coverage.shape)
-            center = np.array([resize // 2, resize // 2, zpos], dtype=float)
-            tgt = np.array(min_idx, dtype=float)
-            vec = tgt - center
-            if guidance_actor:
-                try:
-                    pl.remove_actor(guidance_actor)
-                except Exception:
-                    pass
-            arrow = pv.Arrow(start=center.tolist(), direction=vec.tolist(), scale=20.0)
-            guidance_actor = pl.add_mesh(arrow, color="lime")
+                pl.render()
+            else:
+                # headless: occasional lightweight logging to monitor progress/memory
+                if slice_idx % 50 == 0:
+                    try:
+                        import psutil
 
-            pl.render()
+                        rss = psutil.Process().memory_info().rss
+                        print(f"[headless] frames={slice_idx} RSS={rss}")
+                    except Exception:
+                        pass
+
             slice_idx += 1
             time.sleep(args.frame_delay)
 
@@ -230,13 +269,18 @@ def main():
     t.start()
 
     try:
-        pl.app.exec_()
+        if render_enabled and pl is not None:
+            pl.app.exec_()
+        else:
+            while t.is_alive():
+                time.sleep(0.5)
     except KeyboardInterrupt:
         pass
     finally:
         stop_flag.set()
         t.join(timeout=2)
-        pl.close()
+        if render_enabled and pl is not None:
+            pl.close()
 
 
 if __name__ == "__main__":
