@@ -83,9 +83,18 @@ def build_registered_pointcloud(video, max_frames, samples_per_frame, percentile
 def poisson_sync(points, out_path, voxel_size=1.0, depth=8):
     if points.shape[0] == 0 or o3d is None:
         return None
+    # subsample to a reasonable size to avoid overwhelming Poisson
+    pts_n = points.shape[0]
+    if pts_n > 200000:
+        idx = np.random.choice(pts_n, 200000, replace=False)
+        points = points[idx]
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points[:, :3])
-    pcd = pcd.voxel_down_sample(voxel_size=max(0.5, voxel_size))
+    # voxel downsample may fail for tiny voxel values or degenerate point clouds
+    try:
+        pcd = pcd.voxel_down_sample(voxel_size=max(0.5, voxel_size))
+    except Exception as e:
+        print('[poisson_sync] voxel_down_sample failed, skipping downsample:', e)
     if len(pcd.points) < 50:
         print('[poisson_sync] too few points after downsample')
         return None
