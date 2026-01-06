@@ -10,6 +10,7 @@ import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Optional, Dict
 
 SCRIPT_MAP = {
     "full": "hybrid_ultrasound_3d_full.py",
@@ -17,7 +18,7 @@ SCRIPT_MAP = {
 }
 
 
-def process_video(script: str, video_path: Path, out_dir: Path, env: dict | None = None):
+def process_video(script: str, video_path: Path, out_dir: Path, env: Optional[Dict[str, str]] = None) -> int:
     cmd = ["python", script, "--video", str(video_path), "--out-dir", str(out_dir)]
     env_in = os.environ.copy()
     if env:
