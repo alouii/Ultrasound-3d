@@ -72,6 +72,17 @@ A small prototype project to build 3D ultrasound volumes from 2D video frames. I
 
 - Example script using Xvfb (useful in CI): `scripts/headless_example.sh`.
 
+### Batch processing multiple videos
+
+There is a small helper to process a directory of videos and save per-video outputs:
+
+```bash
+# process all .mp4 files in a directory and save PLY outputs to outputs/
+python scripts/batch_process.py --input-dir dataset/videos --pattern "*.mp4" --script full --out-dir outputs --workers 4 --headless
+```
+
+This will run `hybrid_ultrasound_3d_full.py` on each video and save a mesh PLY per input to the `outputs/` directory. Use `--script safe` to run the lighter-weight safe pipeline instead.
+
 - CI is configured (`.github/workflows/ci.yml`) to run linters and tests on push/PR.
 
 ---
