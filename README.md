@@ -28,3 +28,16 @@ Optical-flow → 3D pose conversion is heuristic here (assumes small motion, nea
 - Run linters: `ruff check .` and `black --check .`
 - Type-check: `mypy --ignore-missing-imports .`
 - Run tests: `pytest -q`
+
+### Quick commands (Makefile)
+
+- Install runtime deps: `make install`
+- Install dev deps: `make dev-install`
+- Run linters: `make lint`
+- Format & auto-fix: `make format`
+- Run tests: `make test`
+- Run basic reconstruction: `make run-us VIDEO=path/to/video.mp4`
+- Run interactive real-time UI: `make run-rt VIDEO=path/to/video.mp4`
+- Run safe low-res reconstruction: `make run-safe VIDEO=path/to/video.mp4`
+- Run off-screen (headless): `make headless VIDEO=path/to/video.mp4`
+- Example using Xvfb: `make xvfb-run SCRIPT="python hybrid_ultrasound_3d_safe.py --video path/to/video.mp4"`
