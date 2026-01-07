@@ -9,7 +9,7 @@ from scipy.ndimage import distance_transform_edt, median_filter, binary_closing
 from skimage import measure, morphology
 
 
-def load_video_frames(video_path, resize=None):
+def load_video_frames(video_path, resize=None, normalize=True):
     cap = cv2.VideoCapture(video_path)
     frames = []
     if not cap.isOpened():
@@ -25,19 +25,24 @@ def load_video_frames(video_path, resize=None):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if resize:
             gray = cv2.resize(gray, (resize, resize))
-        frames.append(gray.astype(np.float32) / 255.0)
+        gray = gray.astype(np.float32)
+        if normalize:
+            gray = gray / 255.0
+        frames.append(gray)
 
     cap.release()
     return np.stack(frames, axis=-1)  # Shape: (H, W, N)
 
 
-def preprocess_volume(volume, smoothing=True):
+def preprocess_volume(volume, smoothing=True, preserve_intensity=False):
     # Optional smoothing across slices
     if smoothing:
         import scipy.ndimage as ndi
 
         volume = ndi.gaussian_filter(volume, sigma=(1, 1, 2))
-    volume = np.clip(volume, 0, 1)
+    # If we are preserving original intensity range (e.g., uint8 0..255), do not clip to 0..1
+    if not preserve_intensity:
+        volume = np.clip(volume, 0, 1)
     return volume
 
 
@@ -70,8 +75,12 @@ def adaptive_mask_from_volume(volume, percentile=99.0, factor=0.6,
     return largest
 
 
-def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0):
+def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=False, volume=None, preserve_intensity=False):
     """Convert binary mask to mesh using signed-distance (TSDF) and marching cubes.
+
+    If preserve_voxel_coords=True and `volume` is provided, vertex colors will be sampled
+    from the `volume` at nearest-neighbor voxel locations so the mesh retains fidelity
+    to the original frames.
 
     Returns an Open3D TriangleMesh and saves it to save_path.
     """
@@ -88,16 +97,44 @@ def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0):
     if verts.size == 0 or faces.size == 0:
         raise RuntimeError("Marching cubes returned no geometry")
 
-    # normalize and scale for visibility
     verts = verts.astype(np.float32)
-    verts -= verts.mean(axis=0, keepdims=True)
-    verts /= (np.max(np.abs(verts)) + 1e-8)
-    verts *= 100 * voxel_scale
+
+    if preserve_voxel_coords:
+        # keep vertices in voxel coordinates (so vertex -> voxel mapping is preserved)
+        verts_scaled = verts * voxel_scale
+    else:
+        # normalize and scale for visibility (legacy behavior)
+        verts_scaled = verts.copy()
+        verts_scaled -= verts_scaled.mean(axis=0, keepdims=True)
+        verts_scaled /= (np.max(np.abs(verts_scaled)) + 1e-8)
+        verts_scaled *= 100 * voxel_scale
 
     mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(verts)
+    mesh.vertices = o3d.utility.Vector3dVector(verts_scaled)
     mesh.triangles = o3d.utility.Vector3iVector(faces.astype(np.int32))
     mesh.compute_vertex_normals()
+
+    # If we have the original volume and requested to preserve voxel coordinates,
+    # sample per-vertex intensity and store as vertex colors. This helps keep
+    # the reconstructed mesh visually faithful to the input video frames.
+    if preserve_voxel_coords and (volume is not None):
+        print("Sampling vertex intensities from volume to preserve fidelity...")
+        # marching_cubes returns coordinates in voxel index space (z, y, x)
+        idx = np.round(verts).astype(int)
+        # clamp
+        idx[:, 0] = np.clip(idx[:, 0], 0, volume.shape[0] - 1)
+        idx[:, 1] = np.clip(idx[:, 1], 0, volume.shape[1] - 1)
+        idx[:, 2] = np.clip(idx[:, 2], 0, volume.shape[2] - 1)
+        intensities = volume[idx[:, 0], idx[:, 1], idx[:, 2]]
+        intensities = intensities.astype(np.float32)
+        # if original intensities were in 0..255, scale to 0..1 for Open3D colors
+        if preserve_intensity and intensities.max() > 1.0:
+            colors = (intensities / 255.0).clip(0.0, 1.0)
+        else:
+            # assume already in 0..1
+            colors = np.clip(intensities, 0.0, 1.0)
+        colors = np.stack([colors, colors, colors], axis=-1)
+        mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
 
     # save
     o3d.io.write_triangle_mesh(save_path, mesh)
@@ -205,6 +242,27 @@ def main():
         action="store_true",
         help="Do not open an interactive viewer after mesh reconstruction (useful for headless/CI)",
     )
+    # Fidelity-preserving options
+    parser.add_argument(
+        "--no-smoothing",
+        action="store_true",
+        help="Disable Gaussian smoothing across slices (preserves per-frame detail)",
+    )
+    parser.add_argument(
+        "--preserve-intensity",
+        action="store_true",
+        help="Keep original intensity range (do not normalize frames to 0..1)",
+    )
+    parser.add_argument(
+        "--preserve-voxel-coords",
+        action="store_true",
+        help="Keep mesh vertices in voxel coordinates so vertex colors can map back to original frames",
+    )
+    parser.add_argument(
+        "--keep-small",
+        action="store_true",
+        help="Keep small connected components when creating mask (do not remove them)",
+    )
     parser.add_argument(
         "--method",
         choices=["poisson", "tsdf"],
@@ -231,7 +289,7 @@ def main():
     )
     args = parser.parse_args()
 
-    volume = load_video_frames(args.video, resize=args.resize)
+    volume = load_video_frames(args.video, resize=args.resize, normalize=(not args.preserve_intensity))
     print(f"Volume shape: {volume.shape} (H x W x Frames)")
 
     if args.preview:
@@ -242,16 +300,33 @@ def main():
         plt.title("Middle Frame")
         plt.show()
 
-    volume = preprocess_volume(volume)
+    volume = preprocess_volume(volume, smoothing=(not args.no_smoothing), preserve_intensity=args.preserve_intensity)
 
     from utils.io import output_path_for_video
 
     save_path = output_path_for_video(args.video, args.out_dir)
+
+    # if requested, keep small connected components by setting min_size to 0
+    if args.keep_small:
+        args.mask_min_size = 0
+
     if args.method == 'tsdf':
         # pass mask params
         global adaptive_mask_from_volume
-        mask = adaptive_mask_from_volume(volume, percentile=args.mask_percentile, factor=args.mask_factor, min_size=args.mask_min_size)
-        mesh = mask_to_mesh_tsdf(mask, save_path)
+        mask = adaptive_mask_from_volume(
+            volume,
+            percentile=args.mask_percentile,
+            factor=args.mask_factor,
+            min_size=args.mask_min_size,
+        )
+        mesh = mask_to_mesh_tsdf(
+            mask,
+            save_path,
+            voxel_scale=args.voxel_size,
+            preserve_voxel_coords=args.preserve_voxel_coords,
+            volume=volume,
+            preserve_intensity=args.preserve_intensity,
+        )
         if not args.no_display:
             try:
                 o3d.visualization.draw_geometries([mesh])
