@@ -75,12 +75,69 @@ def adaptive_mask_from_volume(volume, percentile=99.0, factor=0.6,
     return largest
 
 
-def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=False, volume=None, preserve_intensity=False):
+def sample_volume_trilinear(volume, coords):
+    """Trilinear sample `volume` at fractional voxel coordinates.
+
+    Args:
+        volume: numpy array shape (D, H, W)
+        coords: (N,3) array of fractional coordinates in (z, y, x) voxel index space
+    Returns:
+        values: (N,) interpolated intensities
+    """
+    coords = np.asarray(coords, dtype=np.float32)
+    if coords.size == 0:
+        return np.array([], dtype=np.float32)
+    z = coords[:, 0]
+    y = coords[:, 1]
+    x = coords[:, 2]
+
+    z0 = np.floor(z).astype(int)
+    y0 = np.floor(y).astype(int)
+    x0 = np.floor(x).astype(int)
+    z1 = z0 + 1
+    y1 = y0 + 1
+    x1 = x0 + 1
+
+    z0 = np.clip(z0, 0, volume.shape[0] - 1)
+    y0 = np.clip(y0, 0, volume.shape[1] - 1)
+    x0 = np.clip(x0, 0, volume.shape[2] - 1)
+    z1 = np.clip(z1, 0, volume.shape[0] - 1)
+    y1 = np.clip(y1, 0, volume.shape[1] - 1)
+    x1 = np.clip(x1, 0, volume.shape[2] - 1)
+
+    xd = (x - x0).astype(np.float32)
+    yd = (y - y0).astype(np.float32)
+    zd = (z - z0).astype(np.float32)
+
+    c000 = volume[z0, y0, x0]
+    c001 = volume[z0, y0, x1]
+    c010 = volume[z0, y1, x0]
+    c011 = volume[z0, y1, x1]
+    c100 = volume[z1, y0, x0]
+    c101 = volume[z1, y0, x1]
+    c110 = volume[z1, y1, x0]
+    c111 = volume[z1, y1, x1]
+
+    c00 = c000 * (1 - xd) + c001 * xd
+    c01 = c010 * (1 - xd) + c011 * xd
+    c10 = c100 * (1 - xd) + c101 * xd
+    c11 = c110 * (1 - xd) + c111 * xd
+
+    c0 = c00 * (1 - yd) + c01 * yd
+    c1 = c10 * (1 - yd) + c11 * yd
+
+    c = c0 * (1 - zd) + c1 * zd
+    return c.astype(np.float32)
+
+
+def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=False, volume=None, preserve_intensity=False, sample_method='nearest'):
     """Convert binary mask to mesh using signed-distance (TSDF) and marching cubes.
 
     If preserve_voxel_coords=True and `volume` is provided, vertex colors will be sampled
-    from the `volume` at nearest-neighbor voxel locations so the mesh retains fidelity
+    from the `volume` at nearest-neighbor or trilinear locations so the mesh retains fidelity
     to the original frames.
+
+    `sample_method` can be 'nearest' or 'trilinear'.
 
     Returns an Open3D TriangleMesh and saves it to save_path.
     """
@@ -118,14 +175,20 @@ def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=Fa
     # sample per-vertex intensity and store as vertex colors. This helps keep
     # the reconstructed mesh visually faithful to the input video frames.
     if preserve_voxel_coords and (volume is not None):
-        print("Sampling vertex intensities from volume to preserve fidelity...")
+        print(f"Sampling vertex intensities from volume to preserve fidelity (method={sample_method})...")
         # marching_cubes returns coordinates in voxel index space (z, y, x)
-        idx = np.round(verts).astype(int)
-        # clamp
-        idx[:, 0] = np.clip(idx[:, 0], 0, volume.shape[0] - 1)
-        idx[:, 1] = np.clip(idx[:, 1], 0, volume.shape[1] - 1)
-        idx[:, 2] = np.clip(idx[:, 2], 0, volume.shape[2] - 1)
-        intensities = volume[idx[:, 0], idx[:, 1], idx[:, 2]]
+        if sample_method == 'nearest':
+            idx = np.round(verts).astype(int)
+            # clamp
+            idx[:, 0] = np.clip(idx[:, 0], 0, volume.shape[0] - 1)
+            idx[:, 1] = np.clip(idx[:, 1], 0, volume.shape[1] - 1)
+            idx[:, 2] = np.clip(idx[:, 2], 0, volume.shape[2] - 1)
+            intensities = volume[idx[:, 0], idx[:, 1], idx[:, 2]]
+        elif sample_method == 'trilinear':
+            # use trilinear interpolation at fractional vertex positions
+            intensities = sample_volume_trilinear(volume, verts)
+        else:
+            raise ValueError(f"Unknown sample_method: {sample_method}")
         intensities = intensities.astype(np.float32)
         # if original intensities were in 0..255, scale to 0..1 for Open3D colors
         if preserve_intensity and intensities.max() > 1.0:
@@ -257,6 +320,12 @@ def main():
         "--preserve-voxel-coords",
         action="store_true",
         help="Keep mesh vertices in voxel coordinates so vertex colors can map back to original frames",
+    )
+    parser.add_argument(
+        "--sample-method",
+        choices=["nearest", "trilinear"],
+        default="nearest",
+        help="Method to sample per-vertex intensities when preserving voxel coordinates",
     )
     parser.add_argument(
         "--keep-small",
