@@ -27,8 +27,10 @@ A small prototype project to build 3D ultrasound volumes from 2D video frames. I
 4. Reconstruct a full-resolution mesh (may be slow / memory-heavy):
 
    ```bash
-   python hybrid_ultrasound_3d_full.py --video path/to/video.mp4 --resize 256 --threshold 0.5
+   python hybrid_ultrasound_3d_full.py --video path/to/video.mp4 --resize 256 --threshold 0.5 --sample-method trilinear
    ```
+
+   Tip: use `--sample-method trilinear` to preserve per-frame intensity fidelity on the mesh (more accurate vertex colors).
 
 ---
 
