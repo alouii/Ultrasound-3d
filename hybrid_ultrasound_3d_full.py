@@ -5,7 +5,7 @@ import argparse
 from tqdm import tqdm
 
 # added for adaptive thresholding and TSDF/MC reconstruction
-from scipy.ndimage import distance_transform_edt, median_filter, binary_closing
+from scipy.ndimage import distance_transform_edt, median_filter, binary_closing, binary_opening
 from skimage import measure, morphology
 
 
@@ -69,7 +69,7 @@ def adaptive_mask_from_volume(volume, percentile=90.0, factor=0.5,
     # binary opening to remove small noise (erode then dilate)
     struct = np.ones((3, 3, 3), dtype=bool)
     for _ in range(opening_iter):
-        mask = morphology.binary_opening(mask, structure=struct)
+        mask = binary_opening(mask, structure=struct)
     
     # binary closing to fill small holes (dilate then erode)
     for _ in range(closing_iter):
@@ -102,8 +102,19 @@ def postprocess_mesh(mesh, smoothing_iterations=15, target_reduction=0.5):
     
     print(f"Decimating mesh (target {target_reduction*100:.0f}% of {len(mesh.triangles)} triangles)...")
     target_count = max(4, int(len(mesh.triangles) * target_reduction))
-    mesh_decim = mesh_smooth.simplify_quadric_mesh_simplification(target_count)
-    
+
+    # Some Open3D builds (CUDA) produce a CUDA-backed TriangleMesh without
+    # certain legacy decimation methods. Convert to a CPU TriangleMesh and
+    # use the stable `simplify_quadric_decimation` API.
+    mesh_cpu = o3d.geometry.TriangleMesh()
+    mesh_cpu.vertices = mesh_smooth.vertices
+    mesh_cpu.triangles = mesh_smooth.triangles
+    if mesh_smooth.has_vertex_colors():
+        mesh_cpu.vertex_colors = mesh_smooth.vertex_colors
+    mesh_cpu.compute_vertex_normals()
+
+    mesh_decim = mesh_cpu.simplify_quadric_decimation(target_count)
+
     print(f"Decimated to {len(mesh_decim.triangles)} triangles")
     return mesh_decim
 
