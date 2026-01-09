@@ -46,21 +46,32 @@ def preprocess_volume(volume, smoothing=True, preserve_intensity=False):
     return volume
 
 
-def adaptive_mask_from_volume(volume, percentile=99.0, factor=0.6, 
-                              min_size=5000, closing_iter=2):
+def adaptive_mask_from_volume(volume, percentile=90.0, factor=0.5, 
+                              min_size=2000, closing_iter=3, opening_iter=1):
     """Compute a cleaned binary mask from volume using an adaptive threshold.
 
     Steps:
     - threshold = percentile of intensity * factor
-    - median filter and binary closing to reduce speckle
+    - median filter, binary opening (denoise), and closing (fill holes)
     - remove small connected components, keep largest
+    
+    Improved parameters for realistic ultrasound:
+    - percentile=90.0 (instead of 99): captures more signal, less noisy outliers
+    - factor=0.5 (more aggressive): cleaner separation of tissue
+    - opening_iter: removes small noise blobs before closing
     """
     th = np.percentile(volume, percentile) * factor
     mask = volume > th
+    
     # median to reduce speckle
     mask = median_filter(mask.astype(np.uint8), size=3).astype(bool)
-    # binary closing to fill small holes
+    
+    # binary opening to remove small noise (erode then dilate)
     struct = np.ones((3, 3, 3), dtype=bool)
+    for _ in range(opening_iter):
+        mask = morphology.binary_opening(mask, structure=struct)
+    
+    # binary closing to fill small holes (dilate then erode)
     for _ in range(closing_iter):
         mask = binary_closing(mask, structure=struct)
 
@@ -73,6 +84,28 @@ def adaptive_mask_from_volume(volume, percentile=99.0, factor=0.6,
         return mask
     largest = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
     return largest
+
+
+def postprocess_mesh(mesh, smoothing_iterations=15, target_reduction=0.5):
+    """Polish mesh for visual realism: smoothing + decimation.
+    
+    Args:
+        mesh: Open3D TriangleMesh
+        smoothing_iterations: Number of Laplacian smoothing passes
+        target_reduction: Fraction of triangles to keep (0.0-1.0)
+    
+    Returns:
+        Smoothed and decimated mesh
+    """
+    print(f"Smoothing mesh ({smoothing_iterations} iterations)...")
+    mesh_smooth = mesh.filter_smooth_laplacian(smoothing_iterations, 0.5)
+    
+    print(f"Decimating mesh (target {target_reduction*100:.0f}% of {len(mesh.triangles)} triangles)...")
+    target_count = max(4, int(len(mesh.triangles) * target_reduction))
+    mesh_decim = mesh_smooth.simplify_quadric_mesh_simplification(target_count)
+    
+    print(f"Decimated to {len(mesh_decim.triangles)} triangles")
+    return mesh_decim
 
 
 def sample_volume_trilinear(volume, coords):
@@ -130,7 +163,7 @@ def sample_volume_trilinear(volume, coords):
     return c.astype(np.float32)
 
 
-def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=False, volume=None, preserve_intensity=False, sample_method='nearest'):
+def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=False, volume=None, preserve_intensity=False, sample_method='nearest', postprocess=True, target_reduction=0.5):
     """Convert binary mask to mesh using signed-distance (TSDF) and marching cubes.
 
     If preserve_voxel_coords=True and `volume` is provided, vertex colors will be sampled
@@ -138,6 +171,8 @@ def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=Fa
     to the original frames.
 
     `sample_method` can be 'nearest' or 'trilinear'.
+    
+    If postprocess=True, applies smoothing + decimation for visual realism.
 
     Returns an Open3D TriangleMesh and saves it to save_path.
     """
@@ -190,14 +225,25 @@ def mask_to_mesh_tsdf(mask, save_path, voxel_scale=1.0, preserve_voxel_coords=Fa
         else:
             raise ValueError(f"Unknown sample_method: {sample_method}")
         intensities = intensities.astype(np.float32)
-        # if original intensities were in 0..255, scale to 0..1 for Open3D colors
+        
+        # Normalize colors for better contrast (stretch to full 0..1 range)
         if preserve_intensity and intensities.max() > 1.0:
             colors = (intensities / 255.0).clip(0.0, 1.0)
         else:
-            # assume already in 0..1
-            colors = np.clip(intensities, 0.0, 1.0)
+            # stretch to full range for better visual contrast
+            imin, imax = intensities.min(), intensities.max()
+            if imax > imin:
+                colors = (intensities - imin) / (imax - imin + 1e-8)
+            else:
+                colors = np.ones_like(intensities)
+            colors = np.clip(colors, 0.0, 1.0)
+        
         colors = np.stack([colors, colors, colors], axis=-1)
         mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+
+    # Postprocess for visual realism
+    if postprocess:
+        mesh = postprocess_mesh(mesh, smoothing_iterations=15, target_reduction=target_reduction)
 
     # save
     o3d.io.write_triangle_mesh(save_path, mesh)
@@ -341,20 +387,31 @@ def main():
     parser.add_argument(
         "--mask-percentile",
         type=float,
-        default=99.0,
-        help="Percentile for adaptive thresholding when using tsdf",
+        default=90.0,
+        help="Percentile for adaptive thresholding when using tsdf (default 90 for better signal capture)",
     )
     parser.add_argument(
         "--mask-factor",
         type=float,
-        default=0.6,
-        help="Factor multiplier applied to the percentile threshold when making the binary mask (tsdf method)",
+        default=0.5,
+        help="Factor multiplier applied to the percentile threshold when making the binary mask (default 0.5 for cleaner tissue separation)",
     )
     parser.add_argument(
         "--mask-min-size",
         type=int,
         default=2000,
         help="Minimum connected component size to keep (voxels)",
+    )
+    parser.add_argument(
+        "--no-postprocess",
+        action="store_true",
+        help="Disable mesh postprocessing (smoothing + decimation). Use to keep raw dense mesh.",
+    )
+    parser.add_argument(
+        "--target-reduction",
+        type=float,
+        default=0.5,
+        help="Fraction of triangles to keep after decimation (0.0-1.0). Lower = lighter mesh.",
     )
     args = parser.parse_args()
 
@@ -395,6 +452,9 @@ def main():
             preserve_voxel_coords=args.preserve_voxel_coords,
             volume=volume,
             preserve_intensity=args.preserve_intensity,
+            sample_method=args.sample_method,
+            postprocess=not args.no_postprocess,
+            target_reduction=args.target_reduction,
         )
         if not args.no_display:
             try:
