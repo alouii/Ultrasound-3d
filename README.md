@@ -34,6 +34,54 @@ A small prototype project to build 3D ultrasound volumes from 2D video frames. I
 
 ---
 
+### Quick run commands (cheat sheet) ✅
+
+A short list of the most common commands to launch the project quickly.
+
+- Install dependencies:
+
+  ```bash
+  pip install -r requirements.txt
+  # or use the Makefile
+  make install
+  ```
+
+- Safe, fast test (low memory):
+
+  ```bash
+  python hybrid_ultrasound_3d_safe.py --video path/to/video.mp4 --resize 128
+  ```
+
+- Full/high-resolution reconstruction (heavy):
+
+  ```bash
+  python hybrid_ultrasound_3d_full.py --video path/to/video.mp4 --resize 256 --threshold 0.5 --sample-method trilinear
+  ```
+
+- Real-time demo (GUI):
+
+  ```bash
+  python ai_ultrasound_realtime_imageData.py --video path/to/video.mp4 --resize 256 --max-slices 200
+  ```
+
+- Real-time demo (headless / no GUI):
+
+  ```bash
+  python ai_ultrasound_realtime_imageData.py --video path/to/video.mp4 --resize 256 --max-slices 200 --frame-delay 0.05 --headless > run.log
+  ```
+
+- View results (PyVista / Open3D / HTML):
+
+  ```bash
+  python scripts/view_mesh.py outputs/some_mesh.ply --viewer pyvista
+  python scripts/view_mesh.py outputs/some_mesh.ply --viewer open3d
+  python scripts/view_mesh.py outputs/some_mesh.ply --viewer html --open
+  ```
+
+> Tips: use smaller `--resize` on memory-constrained machines, avoid `--use-sr` unless you have GPU & model weights, and prefer `--headless` for CI/servers.
+
+---
+
 ## Scripts overview
 
 - `us.py` — simple temporal accumulation + PyVista renderer.
